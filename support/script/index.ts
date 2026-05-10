@@ -8,14 +8,14 @@ const routes_config = {
   target: "./support/generated/routes.ts",
 };
 const batch_export_config = {
-  root: "app/model",// 文件只能在配置的root目录下，否则会导致重复名称
+  root: "app/model", // 文件只能在配置的root目录下，否则会导致重复名称
   suffix: [".mold.ts"],
   out: "./support/generated/schema.ts",
   template: `export { schema as {{name}}_schema } from "{{path}}";`,
 };
 
-autoRoutes(routes_config);// 文件路由生成
-batchExport(batch_export_config);// 批量导出文件生成
+autoRoutes(routes_config); // 文件路由生成
+batchExport(batch_export_config); // 批量导出文件生成
 
 if (args[0] === "watch") {
   // 监听路由文件变更

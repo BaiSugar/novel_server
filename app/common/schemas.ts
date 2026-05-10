@@ -5,10 +5,14 @@ export * from "@/support/generated/schema";
 
 /** 响应模型 */
 export const ResSchema = t.Object({
-  /** 响应信息 */
-  msg: t.String(),
-  /** 状态码 */
-  code: t.Number(),
+  /** 业务状态码 */
+  code: t.String(),
+  /** 人类可读的描述信息 */
+  message: t.String(),
   /** 响应数据 */
-  data: t.Unknown(),
+  data: t.Optional(t.Unknown()),
+  /** 请求追踪 ID */
+  requestId: t.Optional(t.String()),
+  /** 额外错误详情 */
+  details: t.Optional(t.Unknown()),
 });

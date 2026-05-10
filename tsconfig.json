@@ -25,6 +25,7 @@
     "noUncheckedIndexedAccess": true, // 索引访问（如 obj[key]）结果自动加 undefined（强制处理边界情况）
     "noImplicitOverride": true, // 重写父类方法时必须加 override 关键字（提升可读性）
     "noFallthroughCasesInSwitch": true, // 禁止 switch 语句的 case 穿透（避免逻辑错误）
+    "ignoreDeprecations": "6.0", // 暂时忽略 TS 6 对 baseUrl 的弃用提示，保留现有路径别名行为
     // --- 代码规范检查（生产环境建议全开启）---
     "noUnusedLocals": true, // 检查未使用的局部变量（可用 _ 前缀标记临时未使用）
     "noUnusedParameters": true, // 检查未使用的函数参数（可用 _ 前缀标记）

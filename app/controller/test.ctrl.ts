@@ -17,7 +17,7 @@ export default $g.ctrl((app) =>
       },
     )
     .post("success", () => $g.success("succData"), { res: t.String() })
-    .post("err", () => $g.error("errData", 0), { res: t.String() })
+    .post("err", () => $g.error("errData", "ERROR"), { res: t.String() })
     .post("err2", () => $g.success({ a: { b: 1 } }), {
       res: t.Object({ a: t.Object({ b: t.String() }) }),
     })

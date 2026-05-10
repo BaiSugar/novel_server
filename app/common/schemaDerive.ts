@@ -3,7 +3,7 @@ import * as m from "./schemas";
 
 /** 响应模型(类型) */
 export type ResType<T> = (typeof m.ResSchema)["static"] & {
-  data: T;
+  data?: T;
 };
 
 /** 响应模型(函数) */

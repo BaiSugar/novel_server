@@ -1,4 +1,5 @@
 export { logger } from "@/app/lib/logger";
+export { prisma } from "@/app/lib/prisma";
 export { redis } from "@/app/lib/redis";
 export { ResSchemaFun } from "./schemaDerive";
 
@@ -9,11 +10,11 @@ import type { ResType } from "./schemaDerive";
 export const ctrl = <T>(fun: (app: typeof controller) => T) => fun;
 
 /** 成功响应 */
-export function success<T>(data: T, msg = ""): ResType<T> {
-  return { msg, code: 1, data };
+export function success<T>(data: T, message = ""): ResType<T> {
+  return { message, code: "SUCCESS", data };
 }
 
 /** 错误响应 */
-export function error(msg = "", code = 0): ResType<null> {
-  return { msg, code, data: null };
+export function error(message = "", code = "ERROR"): ResType<null> {
+  return { message, code };
 }

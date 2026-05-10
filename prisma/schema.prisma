@@ -1,0 +1,145 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+/// 账号角色，当前仅支持管理员和作者。
+enum UserRole {
+  /// 系统管理员。
+  ADMIN
+  /// 网文作者。
+  AUTHOR
+}
+
+/// 账号状态，用于鉴权和软删除。
+enum UserStatus {
+  /// 正常可用。
+  ACTIVE
+  /// 已封禁。
+  BANNED
+  /// 已软删除。
+  DELETED
+}
+
+/// 作品类型。
+enum NovelType {
+  /// 小说。
+  NOVEL
+  /// 剧本。
+  SCRIPT
+}
+
+/// 用户账号主体。
+model User {
+  /// 自增主键。
+  id            Int            @id @default(autoincrement())
+  /// 用户名，登录标识之一。
+  username      String         @unique @db.VarChar(64)
+  /// 邮箱，登录标识之一。
+  email         String         @unique @db.VarChar(255)
+  /// Argon2id 密码哈希。
+  passwordHash  String         @map("password_hash") @db.VarChar(255)
+  /// 账号角色。
+  role          UserRole       @default(AUTHOR)
+  /// 账号状态。
+  status        UserStatus     @default(ACTIVE)
+  /// 最后登录时间。
+  lastLoginAt   DateTime?      @map("last_login_at")
+  /// 创建时间。
+  createdAt     DateTime       @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  /// 账号拥有的刷新令牌。
+  refreshTokens RefreshToken[]
+  /// 用户创建的小说作品。
+  novelBooks    NovelBook[]
+
+  @@map("users")
+}
+
+/// 刷新令牌，只保存不可逆哈希。
+model RefreshToken {
+  /// 自增主键。
+  id        Int       @id @default(autoincrement())
+  /// 所属用户 ID。
+  userId    Int       @map("user_id")
+  /// 刷新令牌 SHA-256 哈希。
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  /// 令牌族，用于复用检测和批量撤销。
+  family    String    @db.Char(36)
+  /// 过期时间。
+  expiresAt DateTime  @map("expires_at")
+  /// 撤销时间。
+  revokedAt DateTime? @map("revoked_at")
+  /// 创建时间。
+  createdAt DateTime  @default(now()) @map("created_at")
+  /// 所属用户。
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+/// 小说作品。
+model NovelBook {
+  /// 自增主键。
+  id          Int           @id @default(autoincrement())
+  /// 所属作者用户 ID。
+  userId      Int           @map("user_id")
+  /// 作品名称。
+  name        String        @db.VarChar(255)
+  /// 作品简介。
+  description String?       @db.Text
+  /// 作品类型。
+  type        NovelType?
+  /// 累计字数。
+  totalWords  Int           @default(0) @map("total_words")
+  /// 排序序号。
+  order       Int           @default(0)
+  /// 是否归档。
+  archived    Boolean       @default(false)
+  /// 是否回收站。
+  isTrash     Boolean       @default(false) @map("is_trash")
+  /// 创建时间。
+  createdAt   DateTime      @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  /// 所属作者。
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 作品下的章节。
+  chapters    NovelChapter[]
+
+  @@index([userId])
+  @@map("novel_books")
+}
+
+/// 小说章节。
+model NovelChapter {
+  /// 自增主键。
+  id        Int       @id @default(autoincrement())
+  /// 所属作品 ID。
+  bookId    Int       @map("book_id")
+  /// 章节标题。
+  title     String    @db.VarChar(500)
+  /// 章节正文（压缩加密后的二进制）。
+  content   Bytes?    @db.LongBlob
+  /// 章节排序序号。
+  order     Int       @default(0)
+  /// 字数统计。
+  wordCount Int       @default(0) @map("word_count")
+  /// 创建时间。
+  createdAt DateTime  @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  /// 所属作品。
+  book      NovelBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@index([bookId])
+  @@map("novel_chapters")
+}
