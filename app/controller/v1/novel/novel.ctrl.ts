@@ -38,6 +38,7 @@ export default $g.ctrl((app) =>
       async ({ currentUser, body }) =>
         $g.success(await NovelService.create(currentUser!.id, body), "创建成功"),
       {
+        audit: { category: "novel", action: "create" },
         requireAuth: true,
         body: t.Object({
           name: t.String({ minLength: 1, maxLength: 255 }),
@@ -54,6 +55,7 @@ export default $g.ctrl((app) =>
           "更新成功",
         ),
       {
+        audit: { category: "novel", action: "update" },
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
         body: t.Object({
@@ -70,6 +72,7 @@ export default $g.ctrl((app) =>
           await NovelService.toggleArchive(Number(params.bookId), currentUser!.id, body.archived),
         ),
       {
+        audit: { category: "novel", action: "archive" },
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
         body: t.Object({ archived: t.Boolean() }),
@@ -81,13 +84,18 @@ export default $g.ctrl((app) =>
         await NovelService.remove(Number(params.bookId), currentUser!.id);
         return $g.success(null, "已移入回收站");
       },
-      { requireAuth: true, params: t.Object({ bookId: t.Numeric() }) },
+      {
+        audit: { category: "novel", action: "delete" },
+        requireAuth: true,
+        params: t.Object({ bookId: t.Numeric() }),
+      },
     )
     .post(
       "books/:bookId/restore",
       async ({ currentUser, params }) =>
         $g.success(await NovelService.restore(Number(params.bookId), currentUser!.id), "已恢复"),
       {
+        audit: { category: "novel", action: "restore" },
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
       },
@@ -98,6 +106,10 @@ export default $g.ctrl((app) =>
         await NovelService.permanentDelete(Number(params.bookId), currentUser!.id);
         return $g.success(null, "已永久删除");
       },
-      { requireAuth: true, params: t.Object({ bookId: t.Numeric() }) },
+      {
+        audit: { category: "novel", action: "permanent_delete" },
+        requireAuth: true,
+        params: t.Object({ bookId: t.Numeric() }),
+      },
     ),
 );

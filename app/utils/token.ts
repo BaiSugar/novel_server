@@ -25,6 +25,8 @@ export interface AccessTokenPayload {
   role: UserRole;
   /** 令牌类型。 */
   type: typeof ACCESS_TOKEN_TYPE;
+  /** 令牌版本号，用于密码修改/封禁后即时失效。 */
+  tv: number;
   /** 签发时间，Unix 秒。 */
   iat: number;
   /** 过期时间，Unix 秒。 */
@@ -157,6 +159,7 @@ function isAccessTokenPayload(payload: unknown): payload is AccessTokenPayload {
   return (
     typeof data.sub === "number" &&
     typeof data.role === "string" &&
+    typeof data.tv === "number" &&
     data.type === ACCESS_TOKEN_TYPE &&
     typeof data.iat === "number" &&
     typeof data.exp === "number"
@@ -167,17 +170,20 @@ function isAccessTokenPayload(payload: unknown): payload is AccessTokenPayload {
  * 签发 Access Token。
  * @param userId 用户 ID。
  * @param role 用户角色。
+ * @param tokenVersion 令牌版本号。
  * @returns Access Token。
  */
 export async function signAccessToken(
   userId: number,
   role: UserRole,
+  tokenVersion: number,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header: JwtHeader = { alg: JWT_ALGORITHM, typ: "JWT" };
   const payload: AccessTokenPayload = {
     sub: userId,
     role,
+    tv: tokenVersion,
     type: ACCESS_TOKEN_TYPE,
     iat: now,
     exp: now + getAccessTokenExpiresIn(),

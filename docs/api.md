@@ -1,6 +1,6 @@
 # 后端 API 对接文档
 
-> 最后更新：2026-05-09  
+> 最后更新：2026-05-10  
 > 基础地址：`http://localhost:4000`（开发环境，由 `.env` PORT 配置）
 
 ---
@@ -426,7 +426,7 @@ GET /v1/novel/books/:bookId/chapters
 | --------- | ------ | ------- |
 | `:bookId` | number | 作品 ID |
 
-**响应：** `ApiEnvelope<Chapter[]>`
+**响应：** `ApiEnvelope<ChapterListItem[]>`（列表不含正文，正文通过详情接口按需加载）
 
 ```json
 {
@@ -436,7 +436,6 @@ GET /v1/novel/books/:bookId/chapters
       "id": 1,
       "bookId": 1,
       "title": "废城觉醒",
-      "content": "夜色如墨，林阵站在废城中央...",
       "order": 0,
       "wordCount": 1024,
       "createdAt": "2026-05-09T18:30:00.000Z",
@@ -571,3 +570,344 @@ PUT /v1/novel/books/:bookId/chapters/reorder
 | `wordCount` | number         | 字数        |
 | `createdAt` | string         | 创建时间    |
 | `updatedAt` | string         | 更新时间    |
+
+---
+
+## 5. 提示词 API
+
+> 路由前缀 `/v1/prompts`，全部需要登录。
+>
+> 提示词模板支持变量占位，配合预制输入选项为用户提供便捷的预设表单。
+> 更新提示词时自动创建历史版本快照，支持版本回溯。
+
+### 5.1 提示词列表
+
+```
+GET /v1/prompts
+```
+
+| 参数       | 类型                                                | 说明                |
+| ---------- | --------------------------------------------------- | ------------------- |
+| `page`     | number                                              | 页码，默认 1        |
+| `pageSize` | number                                              | 每页条数，默认 20   |
+| `privacy`  | `PRIVATE` \| `SHARED` \| `AUTHORIZED`               | 按隐私设置筛选      |
+| `approved` | boolean                                             | 按审核状态筛选      |
+| `keyword`  | string                                              | 按名称/介绍模糊搜索 |
+
+**响应：** `ApiEnvelope<PaginatedList<PromptTemplateListItem>>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "userId": 1,
+        "name": "奇幻开篇生成器",
+        "description": "适合西幻世界观的开篇提示词",
+        "privacy": "SHARED",
+        "usageGuide": "填入世界观关键词后直接生成",
+        "isApproved": true,
+        "versionCount": 3,
+        "createdAt": "2026-05-10T10:00:00.000Z",
+        "updatedAt": "2026-05-10T12:00:00.000Z"
+      }
+    ],
+    "total": 42,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+### 5.2 提示词详情
+
+```
+GET /v1/prompts/:id
+```
+
+| 参数    | 类型   | 说明       |
+| ------- | ------ | ---------- |
+| `:id`   | number | 提示词 ID  |
+
+> 非作者本人查看时，`content` 字段不返回（`presetOptions` 用于前端渲染输入表单，始终返回）。前端仅在编辑模式（作者本人操作）下获取完整提示词内容。
+
+**响应：** `ApiEnvelope<PromptTemplate>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "id": 1,
+    "userId": 1,
+    "name": "奇幻开篇生成器",
+    "content": "你是一位奇幻小说家。请根据以下设定生成小说开篇：\n世界观：{{worldSetting}}\n主角：{{protagonist}}\n字数：{{wordCount}}",
+    "presetOptions": [
+      {
+        "key": "worldSetting",
+        "label": "世界观",
+        "type": "textarea",
+        "placeholder": "请描述世界观背景",
+        "required": true,
+        "defaultValue": null
+      },
+      {
+        "key": "protagonist",
+        "label": "主角类型",
+        "type": "select",
+        "options": ["落魄贵族", "流浪佣兵", "学院新生", "隐居强者"],
+        "placeholder": null,
+        "required": true,
+        "defaultValue": "落魄贵族"
+      },
+      {
+        "key": "wordCount",
+        "label": "生成字数",
+        "type": "text",
+        "placeholder": "如 2000",
+        "required": false,
+        "defaultValue": "2000"
+      }
+    ],
+    "description": "适合西幻世界观的开篇提示词，内置多种主角模板",
+    "privacy": "SHARED",
+    "usageGuide": "填入世界观关键词后直接生成",
+    "isApproved": true,
+    "versionCount": 3,
+    "createdAt": "2026-05-10T10:00:00.000Z",
+    "updatedAt": "2026-05-10T12:00:00.000Z"
+  }
+}
+```
+
+### 5.3 创建提示词
+
+```
+POST /v1/prompts
+```
+
+**请求体：**
+
+| 字段            | 类型                                                | 必填 | 说明                          |
+| --------------- | --------------------------------------------------- | ---- | ----------------------------- |
+| `name`          | string                                              | 是   | 提示词名称，≤255 字符         |
+| `content`       | string                                              | 是   | 提示词正文，支持 {{变量}} 占位 |
+| `presetOptions` | PresetOption[]                                       | 否   | 预制输入选项                  |
+| `description`   | string                                              | 否   | 提示词介绍                    |
+| `privacy`       | `PRIVATE` \| `SHARED` \| `AUTHORIZED`               | 是   | 隐私设置                      |
+| `usageGuide`    | string                                              | 否   | 使用方法（简短说明）          |
+
+**响应：** `ApiEnvelope<PromptTemplate>`
+
+### 5.4 更新提示词
+
+```
+PUT /v1/prompts/:id
+```
+
+**请求体：** 同 5.3，全部字段可选。更新后自动创建一条历史版本快照。
+
+**响应：** `ApiEnvelope<PromptTemplate>`
+
+### 5.5 删除提示词
+
+```
+DELETE /v1/prompts/:id
+```
+
+### 5.6 审核提示词
+
+> 需要 `prompt.approve` 权限（管理员）。
+
+```
+PUT /v1/prompts/:id/approve
+```
+
+**请求体：**
+
+| 字段       | 类型    | 必填 | 说明                       |
+| ---------- | ------- | ---- | -------------------------- |
+| `approved` | boolean | 是   | `true` 通过 / `false` 驳回 |
+
+**响应：** `ApiEnvelope<PromptTemplate>`
+
+### 5.7 历史版本列表
+
+```
+GET /v1/prompts/:id/versions
+```
+
+**响应：** `ApiEnvelope<PromptTemplateVersion[]>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": [
+    {
+      "id": 10,
+      "version": 3,
+      "name": "奇幻开篇生成器",
+      "description": "适合西幻世界观的开篇提示词",
+      "usageGuide": "填入世界观关键词后直接生成",
+      "changeNote": "新增魔法体系选项",
+      "createdAt": "2026-05-10T12:00:00.000Z"
+    },
+    {
+      "id": 7,
+      "version": 2,
+      "name": "奇幻开篇生成器",
+      "description": "西幻开篇提示词初版",
+      "usageGuide": null,
+      "changeNote": "调整主角模板选项",
+      "createdAt": "2026-05-10T11:00:00.000Z"
+    }
+  ]
+}
+```
+
+### 5.8 历史版本详情
+
+```
+GET /v1/prompts/:id/versions/:versionId
+```
+
+**响应：** 包含该版本快照的全部字段：`name`、`content`、`presetOptions`、`description`、`usageGuide`、`changeNote`、`createdAt`。前端可按需选择导入字段。
+
+### 5.9 恢复历史版本
+
+```
+POST /v1/prompts/:id/versions/:versionId/restore
+```
+
+以指定版本的内容覆盖当前提示词，同时生成一条新的版本快照（记录恢复来源）。
+
+**响应：** `ApiEnvelope<PromptTemplate>`
+
+---
+
+## 公共类型
+
+### SafeUser
+
+| 字段          | 类型                                    | 说明         |
+| ------------- | --------------------------------------- | ------------ |
+| `id`          | number                                  | 用户 ID      |
+| `username`    | string                                  | 用户名       |
+| `email`       | string                                  | 邮箱         |
+| `role`        | `"ADMIN"` \| `"AUTHOR"`                 | 角色         |
+| `status`      | `"ACTIVE"` \| `"BANNED"` \| `"DELETED"` | 状态         |
+| `lastLoginAt` | string \| null                          | 最后登录时间 |
+| `createdAt`   | string                                  | 创建时间     |
+| `updatedAt`   | string                                  | 更新时间     |
+
+### AuthTokens
+
+| 字段           | 类型   | 说明                               |
+| -------------- | ------ | ---------------------------------- |
+| `accessToken`  | string | JWT Access Token                   |
+| `refreshToken` | string | Refresh Token 明文（仅签发时返回） |
+| `expiresIn`    | number | Access Token 有效秒数（默认 900）  |
+
+### Book
+
+| 字段          | 类型                            | 说明                 |
+| ------------- | ------------------------------- | -------------------- |
+| `id`          | number                          | 作品 ID              |
+| `userId`      | number                          | 作者用户 ID          |
+| `name`        | string                          | 作品名称             |
+| `description` | string \| null                  | 作品简介             |
+| `type`        | `"NOVEL"` \| `"SCRIPT"` \| null | 作品类型             |
+| `totalWords`  | number                          | 累计字数（自动统计） |
+| `order`       | number                          | 排序序号             |
+| `archived`    | boolean                         | 是否归档             |
+| `isTrash`     | boolean                         | 是否回收站           |
+| `createdAt`   | string                          | 创建时间             |
+| `updatedAt`   | string                          | 更新时间             |
+
+### Chapter
+
+| 字段        | 类型           | 说明        |
+| ----------- | -------------- | ----------- |
+| `id`        | number         | 章节 ID     |
+| `bookId`    | number         | 所属作品 ID |
+| `title`     | string         | 章节标题    |
+| `content`   | string \| null | 章节正文（API 明文，数据库压缩加密保存） |
+| `order`     | number         | 排序序号    |
+| `wordCount` | number         | 字数        |
+| `createdAt` | string         | 创建时间    |
+| `updatedAt` | string         | 更新时间    |
+
+### PromptTemplate
+
+| 字段            | 类型                                                | 说明                          |
+| --------------- | --------------------------------------------------- | ----------------------------- |
+| `id`            | number                                              | 提示词 ID                     |
+| `userId`        | number                                              | 创建者用户 ID                 |
+| `name`          | string                                              | 提示词名称                    |
+| `content`       | string                                              | 提示词正文（支持变量占位）    |
+| `presetOptions` | PresetOption[] \| null                              | 预制输入选项                  |
+| `description`   | string \| null                                      | 提示词介绍                    |
+| `privacy`       | `"PRIVATE"` \| `"SHARED"` \| `"AUTHORIZED"`       | 隐私设置                      |
+| `usageGuide`    | string \| null                                      | 使用方法（简短说明）          |
+| `isApproved`    | boolean                                             | 是否通过审核                  |
+| `versionCount`  | number                                              | 历史版本数量                  |
+| `createdAt`     | string                                              | 创建时间                      |
+| `updatedAt`     | string                                              | 更新时间                      |
+
+### PromptTemplateListItem
+
+| 字段           | 类型                                                | 说明         |
+| -------------- | --------------------------------------------------- | ------------ |
+| `id`           | number                                              | 提示词 ID    |
+| `userId`       | number                                              | 创建者用户 ID |
+| `name`         | string                                              | 提示词名称   |
+| `description`  | string \| null                                      | 提示词介绍   |
+| `privacy`      | `"PRIVATE"` \| `"SHARED"` \| `"AUTHORIZED"`       | 隐私设置     |
+| `usageGuide`   | string \| null                                      | 使用方法     |
+| `isApproved`   | boolean                                             | 是否通过审核 |
+| `versionCount` | number                                              | 版本数量     |
+| `createdAt`    | string                                              | 创建时间     |
+| `updatedAt`    | string                                              | 更新时间     |
+
+### PresetOption
+
+| 字段           | 类型                     | 说明                      |
+| -------------- | ------------------------ | ------------------------- |
+| `key`          | string                   | 占位变量名，如 `"genre"`  |
+| `label`        | string                   | 中文标签，如 `"题材"`     |
+| `type`         | `"text"` \| `"select"` \| `"textarea"` | 控件类型  |
+| `options`      | string[] \| null         | 候选项列表（select 时）   |
+| `placeholder`  | string \| null           | 占位提示文本              |
+| `required`     | boolean                  | 是否必填，默认 false      |
+| `defaultValue` | string \| null           | 默认值                    |
+
+### PromptTemplateVersion
+
+| 字段              | 类型                   | 说明                        |
+| ----------------- | ---------------------- | --------------------------- |
+| `id`              | number                 | 版本 ID                     |
+| `version`         | number                 | 版本号                      |
+| `name`            | string                 | 该版本的提示词名称快照      |
+| `content`         | string                 | 该版本的提示词内容快照      |
+| `presetOptions`   | PresetOption[] \| null | 该版本的预制选项快照        |
+| `description`     | string \| null         | 该版本的提示词介绍快照      |
+| `usageGuide`      | string \| null         | 该版本的使用方法快照        |
+| `changeNote`      | string \| null         | 变更说明                    |
+| `createdAt`       | string                 | 快照创建时间                |
+
+### PromptPrivacy 枚举
+
+| 值           | 说明                               |
+| ------------ | ---------------------------------- |
+| `PRIVATE`    | 仅自用（仅创建者可见可用）         |
+| `SHARED`     | 公开共享（所有作者可见可用）       |
+| `AUTHORIZED` | 授权访问（指定用户/角色可见可用）  |
+
+### 权限
+
+| 角色   | 权限              | 说明                          |
+| ------ | ----------------- | ----------------------------- |
+| ADMIN  | `prompt.approve`  | 审核提示词                    |
+| AUTHOR | `prompt.write`    | 创建/编辑/删除自己的提示词    |
+| AUTHOR | `prompt.read`     | 查看公开和自己有权限的提示词  |

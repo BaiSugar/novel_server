@@ -1,9 +1,4 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { getChapterEncryptionKey } from "@/app/config/encryption";
 
@@ -59,15 +54,4 @@ export function decodeChapterContent(stored: Uint8Array): string {
   decipher.setAuthTag(authTag);
   const compressed = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   return gunzipSync(compressed).toString("utf8");
-}
-
-/**
- * 固定时间比较两个二进制值。
- * @param left 左值。
- * @param right 右值。
- * @returns 是否相等。
- */
-export function safeEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
 }

@@ -86,18 +86,21 @@ const SAFE_USER_SELECT = {
 const LOGIN_USER_SELECT = {
   ...SAFE_USER_SELECT,
   passwordHash: true,
+  tokenVersion: true,
 } as const;
 
 /**
  * 签发令牌对。
  * @param userId 用户 ID。
  * @param role 用户角色。
+ * @param tokenVersion 令牌版本号。
  * @param family 令牌族。
  * @returns 令牌对。
  */
 async function issueTokens(
   userId: number,
   role: UserRole,
+  tokenVersion: number,
   family = createTokenFamily(),
 ): Promise<AuthTokens> {
   const refreshToken = createRefreshToken();
@@ -113,7 +116,7 @@ async function issueTokens(
   });
 
   return {
-    accessToken: await signAccessToken(userId, role),
+    accessToken: await signAccessToken(userId, role, tokenVersion),
     refreshToken,
     expiresIn: getAccessTokenExpiresIn(),
   };
@@ -151,7 +154,7 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
 
   return {
     user,
-    tokens: await issueTokens(user.id, user.role),
+    tokens: await issueTokens(user.id, user.role, 1),
   };
 }
 
@@ -185,7 +188,7 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 
   return {
     user: updated,
-    tokens: await issueTokens(user.id, user.role),
+    tokens: await issueTokens(user.id, user.role, user.tokenVersion),
   };
 }
 
@@ -232,7 +235,7 @@ export async function refresh(refreshToken: string): Promise<AuthResult> {
 
   return {
     user: stored.user,
-    tokens: await issueTokens(stored.userId, stored.user.role, stored.family),
+    tokens: await issueTokens(stored.userId, stored.user.role, stored.user.tokenVersion, stored.family),
   };
 }
 
@@ -271,10 +274,11 @@ export async function getCurrentUserByAccessToken(
       email: true,
       role: true,
       status: true,
+      tokenVersion: true,
     },
   });
 
-  if (!user || user.status !== UserStatus.ACTIVE) return null;
+  if (!user || user.status !== UserStatus.ACTIVE || payload.tv !== user.tokenVersion) return null;
   return user;
 }
 

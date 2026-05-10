@@ -6,16 +6,20 @@ import routes from "@/support/generated/routes";
 import plug_controller from "./controller.plug";
 
 /**
- * 前端跨域来源。开发环境用 Vite 默认端口，生产环境按实际部署域名设置。
- * 配合前端 client.ts 的被动 token 刷新——前端可能与后端不同源。
+ * 前端跨域来源，逗号分隔多个域名。
+ * 开发环境默认 localhost:3000，生产环境按实际部署域名设置。
  */
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
+function buildOrigins(): string | string[] {
+  const raw = process.env.FRONTEND_ORIGIN ?? "http://localhost:3000";
+  const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  return origins.length === 1 ? origins[0]! : origins;
+}
 
 /** 插件入口 */
 export default new Elysia({ name: __filename })
   .use(
     cors({
-      origin: FRONTEND_ORIGIN,
+      origin: buildOrigins(),
       credentials: true,
       allowedHeaders: ["Content-Type", "Authorization"],
     }),

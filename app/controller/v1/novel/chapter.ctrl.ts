@@ -26,6 +26,7 @@ export default $g.ctrl((app) =>
       async ({ params, body }) =>
         $g.success(await ChapterService.create(Number(params.bookId), body), "创建成功"),
       {
+        audit: { category: "novel", action: "create_chapter" },
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
         body: t.Object({
@@ -39,6 +40,7 @@ export default $g.ctrl((app) =>
       async ({ params, body }) =>
         $g.success(await ChapterService.update(Number(params.id), body), "更新成功"),
       {
+        audit: { category: "novel", action: "update_chapter" },
         requireAuth: true,
         params: t.Object({ id: t.Numeric() }),
         body: t.Object({
@@ -53,7 +55,11 @@ export default $g.ctrl((app) =>
         await ChapterService.remove(Number(params.id));
         return $g.success(null, "删除成功");
       },
-      { requireAuth: true, params: t.Object({ id: t.Numeric() }) },
+      {
+        audit: { category: "novel", action: "delete_chapter" },
+        requireAuth: true,
+        params: t.Object({ id: t.Numeric() }),
+      },
     )
     .put(
       "books/:bookId/chapters/reorder",
@@ -62,6 +68,7 @@ export default $g.ctrl((app) =>
         return $g.success(null, "排序成功");
       },
       {
+        audit: { category: "novel", action: "reorder_chapter" },
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
         body: t.Object({

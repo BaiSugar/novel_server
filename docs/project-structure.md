@@ -1,6 +1,6 @@
 # 项目结构
 
-> 最后更新：2026-05-09  
+> 最后更新：2026-05-10  
 > **每次新增/删除/移动文件或文件夹后，必须同步更新本文档。**
 
 ```
@@ -22,6 +22,8 @@ novel/                              # 项目根
 │   │   │   └── novel/               #   作品模块 → /v1/novel/*
 │   │   │       ├── novel.ctrl.ts    #     作品 CRUD + 归档 + 回收站
 │   │   │       └── chapter.ctrl.ts  #     章节 CRUD + 排序
+│   │   │   └── prompt/              #   提示词模块 → /v1/prompts/*
+│   │   │       └── prompt.ctrl.ts   #     提示词 CRUD + 审核 + 版本管理
 │   │   └── test/                    # 测试模块（开发期保留）
 │   │       ├── test.ctrl.ts
 │   │       └── test/
@@ -36,10 +38,13 @@ novel/                              # 项目根
 │   │   └── novel/
 │   │       ├── novel.service.ts     # 作品 CRUD + 归档/回收站/恢复/字数统计
 │   │       └── chapter.service.ts   # 章节 CRUD + 排序
+│   │   └── prompt/
+│   │       └── prompt.service.ts    # 提示词 CRUD + 审核 + 版本快照 + 恢复
 │   │
 │   ├── lib/                        # 基础设施（扁平，不感知业务）
 │   │   ├── prisma.ts                # Prisma 客户端单例（MariaDB 适配器）
 │   │   ├── logger.ts                # 自研日志库（按天轮转、ANSI 彩色 stdout）
+│   │   ├── audit.ts                 # 审计日志（分业务类别、年度 JSON 行日志）
 │   │   ├── httpError.ts             # HTTP 业务错误类 + 状态码→错误码映射
 │   │   ├── redis.ts                 # Redis 客户端（未启用降级为裸 bun redis）
 │   │   └── error.ts                 # 全局未捕获异常处理
@@ -49,12 +54,14 @@ novel/                              # 项目根
 │   │   ├── controller.plug.ts       # 控制器插件：路由挂载 + 请求/响应日志 + 错误拦截
 │   │   ├── auth.plug.ts             # 鉴权插件：Bearer 解析 + 权限宏
 │   │   ├── macro.plug.ts            # 通用宏插件：res() 统一响应格式校验
+│   │   ├── ratelimit.plug.ts        # 限流插件：IP + 路径粒度请求频率控制
 │   │   └── schemas.plug.ts          # 数据模型注册插件
 │   │
 │   ├── utils/                      # 工具函数（扁平）
 │   │   ├── password.ts              # Argon2id 密码哈希/校验
 │   │   ├── token.ts                 # JWT 签发/验证 + Refresh Token 生成/哈希
 │   │   ├── chapterContentCodec.ts   # 章节正文压缩加密/解密解压
+│   │   ├── wordCount.ts             # 章节字数字符统计（去空白）
 │   │   ├── file.ts                  # 文件流写入 + glob 路径树
 │   │   ├── watch.ts                 # 目录监听（路由热更新）
 │   │   └── menu-ui.ts               # CLI 菜单工具
@@ -76,6 +83,7 @@ novel/                              # 项目根
 │
 ├── docs/
 │   ├── api.md                       # API 对接文档
+│   ├── security.md                  # JWT 即时撤销机制详细文档
 │   └── project-structure.md         # 本文件
 │
 ├── support/
@@ -134,5 +142,5 @@ controller/v2/ → 路由 /v2/*（未来）
 | 认证    | /v1/auth  | v1/auth/auth.ctrl.ts | auth/auth.service.ts | 已完成 |
 | 用户    | /v1/user  | v1/user/user.ctrl.ts | user/user.service.ts | 骨架   |
 | 作品    | /v1/novel | v1/novel/            | novel/               | 已完成 |
-| 提示词  | —         | —                    | —                    | 待开发 |
+| 提示词  | /v1/prompts | v1/prompt/prompt.ctrl.ts | prompt/prompt.service.ts | 已完成 |
 | AI 生成 | —         | —                    | —                    | 待开发 |

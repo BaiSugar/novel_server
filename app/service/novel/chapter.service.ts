@@ -5,6 +5,7 @@ import {
   decodeChapterContent,
   encodeChapterContent,
 } from "@/app/utils/chapterContentCodec";
+import { countWords } from "@/app/utils/wordCount";
 import { recountWords } from "./novel.service";
 
 /** 创建章节入参。 */
@@ -23,13 +24,16 @@ export interface UpdateChapterInput {
   content?: string;
 }
 
-/** API 返回的章节信息。 */
+/** API 返回的章节信息（含正文）。 */
 export type ChapterOutput = Omit<NovelChapterModel, "content"> & {
   /** 解密解压后的章节正文。 */
   content: string | null;
 };
 
-/** 章节安全字段选择。 */
+/** API 返回的章节列表项（不含正文）。 */
+export type ChapterListItem = Omit<ChapterOutput, "content">;
+
+/** 章节安全字段选择（含正文）。 */
 const CHAPTER_SELECT = {
   id: true,
   bookId: true,
@@ -41,19 +45,30 @@ const CHAPTER_SELECT = {
   updatedAt: true,
 } as const;
 
+/** 章节列表字段选择（不含正文）。 */
+const CHAPTER_LIST_SELECT = {
+  id: true,
+  bookId: true,
+  title: true,
+  order: true,
+  wordCount: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 /**
- * 获取作品下所有章节。
+ * 获取作品下所有章节（列表视图，不含正文）。
  * @param bookId 作品 ID。
  * @returns 章节列表。
  */
-export async function listByBook(bookId: number): Promise<ChapterOutput[]> {
+export async function listByBook(bookId: number): Promise<ChapterListItem[]> {
   const chapters = await prisma.novelChapter.findMany({
     where: { bookId },
-    select: CHAPTER_SELECT,
+    select: CHAPTER_LIST_SELECT,
     orderBy: [{ order: "asc" }, { id: "asc" }],
   });
 
-  return chapters.map(decodeChapterOutput);
+  return chapters;
 }
 
 /**
@@ -77,7 +92,10 @@ export async function detail(chapterId: number): Promise<ChapterOutput> {
  * @param input 创建入参。
  * @returns 新章节。
  */
-export async function create(bookId: number, input: CreateChapterInput) {
+export async function create(
+  bookId: number,
+  input: CreateChapterInput,
+): Promise<ChapterOutput> {
   const maxOrder = await prisma.novelChapter.aggregate({
     where: { bookId },
     _max: { order: true },
@@ -89,7 +107,7 @@ export async function create(bookId: number, input: CreateChapterInput) {
       title: input.title,
       content: input.content === undefined ? undefined : encodeChapterContent(input.content),
       order: (maxOrder._max.order ?? -1) + 1,
-      wordCount: input.content ? input.content.length : 0,
+      wordCount: input.content ? countWords(input.content) : 0,
     },
     select: CHAPTER_SELECT,
   });
@@ -104,7 +122,10 @@ export async function create(bookId: number, input: CreateChapterInput) {
  * @param input 更新入参。
  * @returns 更新后的章节。
  */
-export async function update(chapterId: number, input: UpdateChapterInput) {
+export async function update(
+  chapterId: number,
+  input: UpdateChapterInput,
+): Promise<ChapterOutput> {
   const chapter = await prisma.novelChapter.findUnique({
     where: { id: chapterId },
     select: { id: true, bookId: true },
@@ -116,7 +137,7 @@ export async function update(chapterId: number, input: UpdateChapterInput) {
   if (input.title !== undefined) data.title = input.title;
   if (input.content !== undefined) {
     data.content = encodeChapterContent(input.content);
-    data.wordCount = input.content.length;
+    data.wordCount = countWords(input.content);
   }
 
   const updated = await prisma.novelChapter.update({

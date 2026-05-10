@@ -33,6 +33,16 @@ enum NovelType {
   SCRIPT
 }
 
+/// 提示词隐私设置。
+enum PromptPrivacy {
+  /// 仅自用。
+  PRIVATE
+  /// 公开共享。
+  SHARED
+  /// 授权访问。
+  AUTHORIZED
+}
+
 /// 用户账号主体。
 model User {
   /// 自增主键。
@@ -47,6 +57,8 @@ model User {
   role          UserRole       @default(AUTHOR)
   /// 账号状态。
   status        UserStatus     @default(ACTIVE)
+  /// 令牌版本号，修改密码或封禁时自增，使已签发的 JWT 立即失效。
+  tokenVersion  Int            @default(1) @map("token_version")
   /// 最后登录时间。
   lastLoginAt   DateTime?      @map("last_login_at")
   /// 创建时间。
@@ -56,7 +68,9 @@ model User {
   /// 账号拥有的刷新令牌。
   refreshTokens RefreshToken[]
   /// 用户创建的小说作品。
-  novelBooks    NovelBook[]
+  novelBooks      NovelBook[]
+  /// 用户创建的提示词模板。
+  promptTemplates PromptTemplate[]
 
   @@map("users")
 }
@@ -142,4 +156,71 @@ model NovelChapter {
 
   @@index([bookId])
   @@map("novel_chapters")
+}
+
+/// 提示词模板。
+model PromptTemplate {
+  /// 自增主键。
+  id            Int            @id @default(autoincrement())
+  /// 创建者用户 ID。
+  userId        Int            @map("user_id")
+  /// 提示词名称。
+  name          String         @db.VarChar(255)
+  /// 提示词内容（支持变量占位）。
+  content       String         @db.Text
+  /// 预制输入选项（JSON 数组）。
+  presetOptions Json?          @map("preset_options")
+  /// 提示词介绍。
+  description   String?        @db.Text
+  /// 隐私设置。
+  privacy       PromptPrivacy  @default(PRIVATE)
+  /// 使用方法（简短说明）。
+  usageGuide    String?        @map("usage_guide") @db.VarChar(500)
+  /// 是否通过审核。
+  isApproved    Boolean        @default(false) @map("is_approved")
+  /// 是否软删除。
+  isDeleted     Boolean        @default(false) @map("is_deleted")
+  /// 创建时间。
+  createdAt     DateTime       @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  /// 创建者。
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 历史版本。
+  versions      PromptTemplateVersion[]
+
+  @@index([userId])
+  @@index([privacy])
+  @@index([isApproved])
+  @@index([isDeleted])
+  @@map("prompt_templates")
+}
+
+/// 提示词历史版本快照。
+model PromptTemplateVersion {
+  /// 自增主键。
+  id               Int       @id @default(autoincrement())
+  /// 所属提示词 ID。
+  promptTemplateId Int       @map("prompt_template_id")
+  /// 版本号。
+  version          Int
+  /// 提示词名称快照。
+  name             String    @db.VarChar(255)
+  /// 提示词内容快照。
+  content          String    @db.Text
+  /// 预制输入选项快照（JSON 数组）。
+  presetOptions    Json?     @map("preset_options")
+  /// 提示词介绍快照。
+  description      String?   @db.Text
+  /// 使用方法快照。
+  usageGuide       String?   @map("usage_guide") @db.VarChar(500)
+  /// 变更说明。
+  changeNote       String?   @map("change_note") @db.VarChar(500)
+  /// 快照创建时间。
+  createdAt        DateTime  @default(now()) @map("created_at")
+  /// 所属提示词。
+  promptTemplate   PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+
+  @@index([promptTemplateId, version])
+  @@map("prompt_template_versions")
 }

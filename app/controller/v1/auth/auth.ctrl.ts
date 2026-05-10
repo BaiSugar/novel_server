@@ -138,8 +138,10 @@ export default $g.ctrl((app) =>
       async ({ body }) =>
         $g.success(toAuthResponse(await AuthService.register(body))),
       {
+        audit: { category: "auth", action: "register" },
         body: RegisterBodySchema,
         res: AuthResultSchema,
+        requireRateLimit: { windowSeconds: 60, maxRequests: 5 },
       },
     )
     .post(
@@ -147,8 +149,10 @@ export default $g.ctrl((app) =>
       async ({ body }) =>
         $g.success(toAuthResponse(await AuthService.login(body))),
       {
+        audit: { category: "auth", action: "login" },
         body: LoginBodySchema,
         res: AuthResultSchema,
+        requireRateLimit: { windowSeconds: 60, maxRequests: 10 },
       },
     )
     .post(
@@ -158,8 +162,10 @@ export default $g.ctrl((app) =>
           toAuthResponse(await AuthService.refresh(body.refreshToken)),
         ),
       {
+        audit: { category: "auth", action: "refresh" },
         body: RefreshTokenBodySchema,
         res: AuthResultSchema,
+        requireRateLimit: { windowSeconds: 60, maxRequests: 10 },
       },
     )
     .post(
@@ -167,6 +173,7 @@ export default $g.ctrl((app) =>
       async ({ body }) =>
         $g.success(await AuthService.logout(body.refreshToken)),
       {
+        audit: { category: "auth", action: "logout" },
         requireAuth: true,
         body: RefreshTokenBodySchema,
         res: t.Boolean(),
