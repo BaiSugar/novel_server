@@ -1,4 +1,4 @@
-import { NovelType } from "@/app/generated/prisma/enums";
+import type { NovelType } from "@/app/generated/prisma/enums";
 import { HttpError } from "@/app/lib/httpError";
 import { prisma } from "@/app/lib/prisma";
 
@@ -129,7 +129,11 @@ export async function create(userId: number, input: CreateBookInput) {
  * @param input 更新入参。
  * @returns 更新后的作品。
  */
-export async function update(bookId: number, userId: number, input: UpdateBookInput) {
+export async function update(
+  bookId: number,
+  userId: number,
+  input: UpdateBookInput,
+) {
   const book = await prisma.novelBook.findFirst({
     where: { id: bookId, userId },
     select: { id: true },
@@ -151,7 +155,11 @@ export async function update(bookId: number, userId: number, input: UpdateBookIn
  * @param archived 是否归档。
  * @returns 更新后的作品。
  */
-export async function toggleArchive(bookId: number, userId: number, archived: boolean) {
+export async function toggleArchive(
+  bookId: number,
+  userId: number,
+  archived: boolean,
+) {
   const book = await prisma.novelBook.findFirst({
     where: { id: bookId, userId },
     select: { id: true },
@@ -211,7 +219,10 @@ export async function restore(bookId: number, userId: number) {
  * @param bookId 作品 ID。
  * @param userId 作者用户 ID。
  */
-export async function permanentDelete(bookId: number, userId: number): Promise<void> {
+export async function permanentDelete(
+  bookId: number,
+  userId: number,
+): Promise<void> {
   const book = await prisma.novelBook.findFirst({
     where: { id: bookId, userId, isTrash: true },
     select: { id: true },

@@ -48,6 +48,10 @@ export function statusToErrorCode(status: number): string {
       return "CONFLICT";
     case 422:
       return "VALIDATION_ERROR";
+    case 499:
+      return "CLIENT_DISCONNECTED";
+    case 503:
+      return "MODEL_UNAVAILABLE";
     default:
       return "INTERNAL_ERROR";
   }

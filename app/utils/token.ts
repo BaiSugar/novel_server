@@ -53,7 +53,11 @@ const MIN_TOKEN_SECONDS = 60;
  * @param name 变量名（用于警告日志）。
  * @returns 有效秒数。
  */
-function parseTokenSeconds(raw: string | undefined, fallback: number, name: string): number {
+function parseTokenSeconds(
+  raw: string | undefined,
+  fallback: number,
+  name: string,
+): number {
   // 去掉可能残留的引号（兼容 Bun 不剥离引号的版本）
   const sanitized = raw?.replace(/^["']|["']$/g, "") ?? "";
   const parsed = Number(sanitized);
@@ -73,7 +77,11 @@ function parseTokenSeconds(raw: string | undefined, fallback: number, name: stri
  * @returns Access Token 有效秒数。
  */
 export function getAccessTokenExpiresIn(): number {
-  return parseTokenSeconds(process.env.ACCESS_TOKEN_EXPIRES_IN, 900, "ACCESS_TOKEN_EXPIRES_IN");
+  return parseTokenSeconds(
+    process.env.ACCESS_TOKEN_EXPIRES_IN,
+    900,
+    "ACCESS_TOKEN_EXPIRES_IN",
+  );
 }
 
 /**
@@ -81,7 +89,11 @@ export function getAccessTokenExpiresIn(): number {
  * @returns Refresh Token 有效秒数。
  */
 export function getRefreshTokenExpiresIn(): number {
-  return parseTokenSeconds(process.env.REFRESH_TOKEN_EXPIRES_IN, 604800, "REFRESH_TOKEN_EXPIRES_IN");
+  return parseTokenSeconds(
+    process.env.REFRESH_TOKEN_EXPIRES_IN,
+    604800,
+    "REFRESH_TOKEN_EXPIRES_IN",
+  );
 }
 
 /**

@@ -1,11 +1,11 @@
 import { Elysia } from "elysia";
+import { type AuditCategory, audit } from "@/app/lib/audit";
 import { isHttpError } from "@/app/lib/httpError";
 import { logger } from "@/app/lib/logger";
-import { audit, type AuditCategory } from "@/app/lib/audit";
 import plug_auth from "./auth.plug";
 import plug_macro from "./macro.plug";
-import plug_schemas from "./schemas.plug";
 import plug_ratelimit from "./ratelimit.plug";
+import plug_schemas from "./schemas.plug";
 
 /** 请求体脱敏字段。 */
 const SENSITIVE_KEYS = new Set([
@@ -13,6 +13,12 @@ const SENSITIVE_KEYS = new Set([
   "accessToken",
   "refreshToken",
   "token",
+  "apiKey",
+  "apiKeyEncrypted",
+  "userMessage",
+  "systemPrompt",
+  "prompt",
+  "promptInputs",
 ]);
 
 /** 开发日志开关，默认开启（`DEV_LOG=false` 关闭） */
@@ -85,7 +91,12 @@ function printDevRequest(method: string, pathname: string): void {
  * @param pathname 请求路径。
  * @param elapsed  耗时毫秒数。
  */
-function printDevLog(method: string, status: number, pathname: string, elapsed: number): void {
+function printDevLog(
+  method: string,
+  status: number,
+  pathname: string,
+  elapsed: number,
+): void {
   if (!DEV_LOG) return;
 
   const m = method.padEnd(6);
@@ -131,7 +142,8 @@ function formatValidationMessage(details: Record<string, unknown>): string {
     const msg = String(error.message ?? "");
     if (msg.includes("minLength")) return `${path} 长度不足`;
     if (msg.includes("maxLength")) return `${path} 长度超出限制`;
-    if (msg.includes("format") || msg.includes("pattern")) return `${path} 格式不正确`;
+    if (msg.includes("format") || msg.includes("pattern"))
+      return `${path} 格式不正确`;
 
     return `${path}: ${error.summary || error.message || "校验失败"}`;
   });
@@ -175,27 +187,42 @@ export default new Elysia({ name: __filename })
       body !== undefined ? { body: redactSensitive(body) } : body,
     );
   })
-  .onAfterResponse(({ set, request, startTime, currentUser, requestId, store }) => {
-    const elapsed = Date.now() - startTime;
-    const pathname = new URL(request.url).pathname;
-    const status = Number(set.status) || 200;
+  .onAfterResponse(
+    ({ set, request, startTime, currentUser, requestId, store }) => {
+      const elapsed = Date.now() - startTime;
+      const pathname = new URL(request.url).pathname;
+      const status = Number(set.status) || 200;
 
-    logger.info(`[response] ${request.method} ${pathname} ${status} ${elapsed}ms`);
+      logger.info(
+        `[response] ${request.method} ${pathname} ${status} ${elapsed}ms`,
+      );
 
-    printDevLog(request.method, status, pathname, elapsed);
+      printDevLog(request.method, status, pathname, elapsed);
 
-    // 审计日志：读取 controller 通过 audit 宏写入 store 的元信息
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const category = (store as any)._auditCategory as AuditCategory | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const action = (store as any)._auditAction as string | undefined;
-    if (status < 300 && request.method !== "GET" && category && action) {
-      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        request.headers.get("x-real-ip") ?? "127.0.0.1";
-      const userId = currentUser?.id ?? null;
-      audit.write({ timestamp: new Date().toISOString(), category, action, userId, requestId, ip });
-    }
-  })
+      // 审计日志：读取 controller 通过 audit 宏写入 store 的元信息
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const category = (store as any)._auditCategory as
+        | AuditCategory
+        | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const action = (store as any)._auditAction as string | undefined;
+      if (status < 300 && request.method !== "GET" && category && action) {
+        const ip =
+          request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+          request.headers.get("x-real-ip") ??
+          "127.0.0.1";
+        const userId = currentUser?.id ?? null;
+        audit.write({
+          timestamp: new Date().toISOString(),
+          category,
+          action,
+          userId,
+          requestId,
+          ip,
+        });
+      }
+    },
+  )
   .onError(({ error: errObj, code, request, set, requestId }) => {
     const err = errObj instanceof Error ? errObj : new Error(String(errObj));
     let errorCode = "INTERNAL_ERROR";
@@ -226,11 +253,20 @@ export default new Elysia({ name: __filename })
     });
 
     // 安全事件审计：401/403/429
-    if (typeof set.status === "number" && [401, 403, 429].includes(set.status)) {
-      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        request.headers.get("x-real-ip") ?? "127.0.0.1";
-      const action = set.status === 429 ? "rate_limited" :
-        set.status === 403 ? "forbidden" : "auth_failed";
+    if (
+      typeof set.status === "number" &&
+      [401, 403, 429].includes(set.status)
+    ) {
+      const ip =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        request.headers.get("x-real-ip") ??
+        "127.0.0.1";
+      const action =
+        set.status === 429
+          ? "rate_limited"
+          : set.status === 403
+            ? "forbidden"
+            : "auth_failed";
       audit.security(action, null, requestId ?? "", ip, {
         pathname: new URL(request.url).pathname,
         errorCode,

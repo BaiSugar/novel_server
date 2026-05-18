@@ -43,6 +43,100 @@ enum PromptPrivacy {
   AUTHORIZED
 }
 
+/// 分类类型，目前用于提示词分类。
+enum CategoryType {
+  /// 提示词分类。
+  PROMPT
+}
+
+/// 创意工具卡片图标枚举，与前端 CreativeToolIcon 联合类型一一对应。
+enum CreativeToolIcon {
+  SPARKLES
+  BOOK
+  BADGE
+  FILE
+  LIST
+  TRIANGLE
+  GEM
+  PAPERCLIP
+  USER
+  MASK
+  GLOBE
+  LINES
+  IMAGE
+}
+
+/// AI 模型账号故障转移策略。
+enum AiModelFailoverStrategy {
+  /// 按优先级顺序尝试候选账号。
+  SEQUENTIAL
+  /// 按游标轮询候选账号。
+  ROUND_ROBIN
+}
+
+/// AI 模型推理强度。
+enum AiReasoningEffort {
+  /// 不启用推理增强。
+  NONE
+  /// 低推理强度。
+  LOW
+  /// 中等推理强度。
+  MEDIUM
+  /// 高推理强度。
+  HIGH
+  /// 极高推理强度。
+  XHIGH
+}
+
+/// AI 文本生成模式。
+enum AiGenerationMode {
+  /// 标准单轮生成。
+  STANDARD
+  /// Agent 工具循环生成。
+  AGENT
+}
+
+/// AI 会话状态。
+enum AiConversationStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+/// AI 消息角色。
+enum AiMessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+/// AI 消息状态。
+enum AiMessageStatus {
+  PENDING
+  ACTIVE
+  SUPERSEDED
+  FAILED
+}
+
+/// AI 文本生成任务状态。
+enum AiGenerationJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+/// AI 图片生成任务状态。
+enum AiImageGenerationJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
 /// 用户账号主体。
 model User {
   /// 自增主键。
@@ -71,6 +165,20 @@ model User {
   novelBooks      NovelBook[]
   /// 用户创建的提示词模板。
   promptTemplates PromptTemplate[]
+  /// 用户创建的 AI 会话。
+  aiConversations AiConversation[]
+  /// 用户发起的 AI 文本生成任务。
+  aiGenerationJobs AiGenerationJob[]
+  /// 用户发起的 AI 图片生成任务。
+  aiImageGenerationJobs AiImageGenerationJob[]
+  /// 用户创建的上下文素材。
+  contextItems ContextItem[]
+  /// 用户创建的作品上下文绑定。
+  novelContextBindings NovelContextBinding[]
+  /// 用户的模型偏好设置。
+  modelState       UserModelState?
+  /// 用户的提示词偏好设置。
+  promptStates     UserPromptState[]
 
   @@map("users")
 }
@@ -128,6 +236,8 @@ model NovelBook {
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// 作品下的章节。
   chapters    NovelChapter[]
+  /// 作品可使用的上下文素材绑定。
+  contextBindings NovelContextBinding[]
 
   @@index([userId])
   @@map("novel_books")
@@ -141,6 +251,8 @@ model NovelChapter {
   bookId    Int       @map("book_id")
   /// 章节标题。
   title     String    @db.VarChar(500)
+  /// 章节概要。
+  summary   String?   @db.Text @map("summary")
   /// 章节正文（压缩加密后的二进制）。
   content   Bytes?    @db.LongBlob
   /// 章节排序序号。
@@ -174,6 +286,8 @@ model PromptTemplate {
   description   String?        @db.Text
   /// 隐私设置。
   privacy       PromptPrivacy  @default(PRIVATE)
+  /// 所属分类 ID（可空，未分类为 null）。
+  categoryId    Int?           @map("category_id")
   /// 使用方法（简短说明）。
   usageGuide    String?        @map("usage_guide") @db.VarChar(500)
   /// 是否通过审核。
@@ -186,6 +300,8 @@ model PromptTemplate {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   /// 创建者。
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 所属分类。
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   /// 历史版本。
   versions      PromptTemplateVersion[]
 
@@ -193,6 +309,7 @@ model PromptTemplate {
   @@index([privacy])
   @@index([isApproved])
   @@index([isDeleted])
+  @@index([categoryId])
   @@map("prompt_templates")
 }
 
@@ -223,4 +340,542 @@ model PromptTemplateVersion {
 
   @@index([promptTemplateId, version])
   @@map("prompt_template_versions")
+}
+
+/// 提示词分类。
+model Category {
+  /// 自增主键。
+  id              Int           @id @default(autoincrement())
+  /// 分类类型，保留字段便于后续扩展，目前固定为 PROMPT。
+  type            CategoryType  @default(PROMPT)
+  /// 分类显示名。
+  name            String        @db.VarChar(64)
+  /// 排序序号，升序。
+  order           Int           @default(0)
+  /// 冗余计数：仅统计 SHARED + isApproved=true 的提示词数量，写操作时由 service 维护。
+  promptCount     Int           @default(0) @map("prompt_count")
+  /// 创建时间。
+  createdAt       DateTime      @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  /// 引用该分类的提示词。
+  promptTemplates PromptTemplate[]
+  /// 引用该提示词分类的创意工具。
+  creativeTools   CreativeTool[]
+
+  @@unique([type, name])
+  @@index([type, order])
+  @@map("categories")
+}
+
+/// 创意工具卡片，展示在首页工具面板。
+model CreativeTool {
+  /// 自增主键。
+  id            Int               @id @default(autoincrement())
+  /// 工具名称。
+  name          String            @db.VarChar(128)
+  /// 工具描述。
+  description   String            @db.VarChar(500)
+  /// 卡片背景图标。
+  icon          CreativeToolIcon
+  /// 所属提示词分类 ID，用于前端筛选。
+  categoryId    Int?              @map("category_id")
+  /// 是否显示 NEW 角标。
+  isNew         Boolean           @default(false) @map("is_new")
+  /// 排序序号，升序。
+  order         Int               @default(0)
+  /// 创建时间。
+  createdAt     DateTime          @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  /// 所属提示词分类。
+  category      Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
+  @@map("creative_tools")
+}
+
+/// 上下文来源配置，用于定义人物卡、词条卡、备忘录等素材来源。
+model ContextSource {
+  /// 自增主键。
+  id             Int           @id @default(autoincrement())
+  /// 来源展示名。
+  name           String        @db.VarChar(64)
+  /// 来源配置键，全局唯一。
+  key            String        @unique @db.VarChar(64)
+  /// 来源说明。
+  description    String?       @db.VarChar(500)
+  /// 表单字段配置。
+  fieldSchema    Json?         @map("field_schema")
+  /// 上下文渲染模板。
+  renderTemplate String?       @map("render_template") @db.Text
+  /// 是否启用。
+  enabled        Boolean       @default(true)
+  /// 排序序号。
+  sortOrder      Int           @default(0) @map("sort_order")
+  /// 创建时间。
+  createdAt      DateTime      @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  /// 该来源下的上下文素材。
+  items          ContextItem[]
+
+  @@index([enabled, sortOrder])
+  @@map("context_sources")
+}
+
+/// 作者级上下文素材，生成链路通过 contextItemIds 引用。
+model ContextItem {
+  /// 自增主键。
+  id            Int                    @id @default(autoincrement())
+  /// 所属作者用户 ID。
+  userId        Int                    @map("user_id")
+  /// 来源配置 ID。
+  sourceId      Int                    @map("source_id")
+  /// 素材标题。
+  title         String                 @db.VarChar(128)
+  /// 素材摘要。
+  summary       String?                @db.VarChar(500)
+  /// 结构化内容。
+  data          Json?
+  /// 后端渲染后的模型上下文文本。
+  renderedText  String                 @map("rendered_text") @db.Text
+  /// 是否作者级全局可用。
+  isGlobal      Boolean                @default(false) @map("is_global")
+  /// 是否软删除。
+  isDeleted     Boolean                @default(false) @map("is_deleted")
+  /// 创建时间。
+  createdAt     DateTime               @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+  /// 所属作者。
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 来源配置。
+  source        ContextSource          @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// 作品使用绑定。
+  novelBindings NovelContextBinding[]
+
+  @@index([userId, sourceId, isDeleted])
+  @@index([userId, isGlobal, isDeleted])
+  @@map("context_items")
+}
+
+/// 作品与上下文素材的使用关系。
+model NovelContextBinding {
+  /// 自增主键。
+  id            Int         @id @default(autoincrement())
+  /// 所属作者用户 ID。
+  userId        Int         @map("user_id")
+  /// 作品 ID。
+  novelId       Int         @map("novel_id")
+  /// 上下文素材 ID。
+  contextItemId Int         @map("context_item_id")
+  /// 作品下默认展示排序。
+  sortOrder     Int         @default(0) @map("sort_order")
+  /// 绑定是否有效。
+  enabled       Boolean     @default(true)
+  /// 创建时间。
+  createdAt     DateTime    @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  /// 所属作者。
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 绑定作品。
+  novel         NovelBook   @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  /// 绑定素材。
+  contextItem   ContextItem @relation(fields: [contextItemId], references: [id], onDelete: Cascade)
+
+  @@unique([novelId, contextItemId])
+  @@index([userId, novelId, enabled, sortOrder])
+  @@index([contextItemId])
+  @@map("novel_context_bindings")
+}
+
+/// AI 模型定义，描述真实底层模型能力。
+model AiModelDefinition {
+  /// 自增主键。
+  id                  Int                       @id @default(autoincrement())
+  /// 传给底层 API 的模型标识。
+  identifier          String                    @db.VarChar(128)
+  /// 管理端展示名称。
+  displayName         String                    @map("display_name") @db.VarChar(128)
+  /// 上下文窗口 token 数。
+  contextWindow       Int                       @map("context_window")
+  /// 单次最大输出 token 数。
+  maxOutputTokens     Int                       @map("max_output_tokens")
+  /// 默认温度。
+  defaultTemperature  Decimal                   @map("default_temperature") @db.Decimal(3, 2)
+  /// 推理强度。
+  reasoningEffort     AiReasoningEffort         @default(NONE) @map("reasoning_effort")
+  /// 额外模型参数。
+  extraParams         Json?                     @map("extra_params")
+  /// 能力标记数组。
+  capabilities        Json?
+  /// 是否启用。
+  enabled             Boolean                   @default(true)
+  /// 创建时间。
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+  /// 绑定到该模型的槽位。
+  slots               AiModelSlot[]
+  /// 账号候选绑定。
+  accountBindings     AiModelAccountBinding[]
+  /// 账号健康度记录。
+  healthRecords       AiProviderAccountHealth[]
+
+  @@unique([identifier])
+  @@map("ai_model_definitions")
+}
+
+/// AI 模型槽位，对前端暴露稳定 modelId。
+model AiModelSlot {
+  /// 槽位 ID，固定契约值。
+  id                  Int                       @id
+  /// 面向用户展示的名称。
+  displayName         String                    @map("display_name") @db.VarChar(64)
+  /// 面向用户展示的描述。
+  description         String                    @db.VarChar(500)
+  /// 标签数组。
+  tags                Json?
+  /// 列表排序。
+  sortOrder           Int                       @default(0) @map("sort_order")
+  /// 是否对前端可见。
+  enabled             Boolean                   @default(true)
+  /// 故障转移策略。
+  failoverStrategy    AiModelFailoverStrategy   @default(SEQUENTIAL) @map("failover_strategy")
+  /// 推荐温度。
+  defaultTemperature  Decimal?                  @map("default_temperature") @db.Decimal(3, 2)
+  /// 当前绑定的底层模型 ID。
+  boundModelId        Int?                      @map("bound_model_id")
+  /// 当前绑定的底层模型。
+  boundModel          AiModelDefinition?        @relation(fields: [boundModelId], references: [id], onDelete: SetNull)
+  /// 创建时间。
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  @@index([enabled, sortOrder])
+  @@index([boundModelId])
+  @@map("ai_model_slots")
+}
+
+/// AI 访问账号。
+model AiProviderAccount {
+  /// 自增主键。
+  id                  Int                       @id @default(autoincrement())
+  /// 平台标识。
+  platform            String                    @db.VarChar(32)
+  /// 管理端显示名。
+  label               String                    @db.VarChar(64)
+  /// 接口基础地址。
+  baseUrl             String                    @map("base_url") @db.VarChar(255)
+  /// API Key 加密后存储。
+  apiKeyEncrypted     String                    @map("api_key_encrypted") @db.Text
+  /// 额外请求头。
+  extraHeaders        Json?                     @map("extra_headers")
+  /// 额外请求参数。
+  extraParams         Json?                     @map("extra_params")
+  /// 账号默认优先级。
+  priority            Int                       @default(0)
+  /// 轮询权重预留值。
+  weight              Int                       @default(1)
+  /// 是否启用。
+  enabled             Boolean                   @default(true)
+  /// 创建时间。
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+  /// 模型候选绑定。
+  modelBindings       AiModelAccountBinding[]
+  /// 健康度记录。
+  healthRecords       AiProviderAccountHealth[]
+
+  @@index([platform, enabled])
+  @@map("ai_provider_accounts")
+}
+
+/// AI 模型与账号的候选绑定关系。
+model AiModelAccountBinding {
+  /// 自增主键。
+  id                  Int                       @id @default(autoincrement())
+  /// 模型定义 ID。
+  modelId             Int                       @map("model_id")
+  /// 访问账号 ID。
+  accountId           Int                       @map("account_id")
+  /// 该模型下的候选优先级。
+  priority            Int                       @default(0)
+  /// 在该模型下是否启用。
+  enabled             Boolean                   @default(true)
+  /// 创建时间。
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+  /// 所属模型。
+  model               AiModelDefinition         @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  /// 访问账号。
+  account             AiProviderAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([modelId, accountId])
+  @@index([modelId, priority])
+  @@index([accountId])
+  @@map("ai_model_account_bindings")
+}
+
+/// AI 访问账号健康度统计。
+model AiProviderAccountHealth {
+  /// 自增主键。
+  id                    Int                       @id @default(autoincrement())
+  /// 模型定义 ID。
+  modelId               Int                       @map("model_id")
+  /// 访问账号 ID。
+  accountId             Int                       @map("account_id")
+  /// 统计滑窗样本数。
+  windowSize            Int                       @default(50) @map("window_size")
+  /// 成功次数。
+  successCount          Int                       @default(0) @map("success_count")
+  /// 失败次数。
+  failureCount          Int                       @default(0) @map("failure_count")
+  /// p95 延迟（毫秒）。
+  p95LatencyMs          Int?                      @map("p95_latency_ms")
+  /// 连续失败次数。
+  consecutiveFailures   Int                       @default(0) @map("consecutive_failures")
+  /// 熔断截止时间。
+  circuitOpenUntil      DateTime?                 @map("circuit_open_until")
+  /// 最近一次成功时间。
+  lastSuccessAt         DateTime?                 @map("last_success_at")
+  /// 最近一次失败时间。
+  lastFailureAt         DateTime?                 @map("last_failure_at")
+  /// 最近一次错误码。
+  lastErrorCode         String?                   @map("last_error_code") @db.VarChar(64)
+  /// 更新时间。
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
+  /// 所属模型。
+  model                 AiModelDefinition         @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  /// 访问账号。
+  account               AiProviderAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([modelId, accountId])
+  @@index([modelId])
+  @@index([accountId])
+  @@map("ai_provider_account_health")
+}
+
+/// AI 文本生成会话。
+model AiConversation {
+  /// 自增主键。
+  id             Int                    @id @default(autoincrement())
+  /// 归属用户 ID。
+  userId         Int                    @map("user_id")
+  /// 会话标题。
+  title          String                 @default("") @db.VarChar(128)
+  /// 默认生成模式。
+  mode           AiGenerationMode       @default(STANDARD)
+  /// 默认模型槽位 ID。
+  modelId        Int                    @map("model_id")
+  /// 会话级系统提示词。
+  systemPrompt   String?                @map("system_prompt") @db.Text
+  /// 弱外键业务引用和上下文默认值。
+  metadata       Json?
+  /// 会话状态。
+  status         AiConversationStatus   @default(ACTIVE)
+  /// 活跃消息计数。
+  messageCount   Int                    @default(0) @map("message_count")
+  /// 最近活跃消息时间。
+  lastMessageAt  DateTime?              @map("last_message_at")
+  /// 创建时间。
+  createdAt      DateTime               @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  /// 所属用户。
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 会话消息。
+  messages       AiMessage[]
+  /// 生成任务。
+  jobs           AiGenerationJob[]
+
+  @@index([userId, status, lastMessageAt])
+  @@index([userId, createdAt])
+  @@map("ai_conversations")
+}
+
+/// AI 文本生成消息。
+model AiMessage {
+  /// 自增主键。
+  id               Int              @id @default(autoincrement())
+  /// 归属会话 ID。
+  conversationId   Int              @map("conversation_id")
+  /// 父消息 ID。
+  parentMessageId  Int?             @map("parent_message_id")
+  /// 消息角色。
+  role             AiMessageRole
+  /// 消息状态。
+  status           AiMessageStatus  @default(ACTIVE)
+  /// 可读文本内容。
+  content          String           @db.MediumText
+  /// 内容 SHA-256。
+  contentHash      String           @map("content_hash") @db.Char(64)
+  /// assistant 产出的工具调用。
+  toolCalls        Json?            @map("tool_calls")
+  /// 工具调用 ID。
+  toolCallId       String?          @map("tool_call_id") @db.VarChar(64)
+  /// 工具名称。
+  toolName         String?          @map("tool_name") @db.VarChar(64)
+  /// token 用量。
+  tokenUsage       Json?            @map("token_usage")
+  /// 本次使用的模型槽位 ID。
+  modelId          Int?             @map("model_id")
+  /// 关联任务 ID。
+  jobId            Int?             @map("job_id")
+  /// 分支内顺序。
+  seq              Int
+  /// 创建时间。
+  createdAt        DateTime         @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  /// 所属会话。
+  conversation     AiConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// 父消息。
+  parent           AiMessage?       @relation("AiMessageChildren", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  /// 子消息。
+  children         AiMessage[]      @relation("AiMessageChildren")
+  /// 关联生成任务。
+  job              AiGenerationJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, status, seq])
+  @@index([parentMessageId, status])
+  @@index([conversationId, createdAt])
+  @@index([toolCallId])
+  @@index([jobId])
+  @@map("ai_messages")
+}
+
+/// AI 文本生成任务。
+model AiGenerationJob {
+  /// 自增主键。
+  id                Int                    @id @default(autoincrement())
+  /// 归属会话 ID。
+  conversationId    Int                    @map("conversation_id")
+  /// 归属用户 ID。
+  userId            Int                    @map("user_id")
+  /// 生成模式。
+  mode              AiGenerationMode
+  /// 使用的模型槽位 ID。
+  modelId           Int                    @map("model_id")
+  /// 任务状态。
+  status            AiGenerationJobStatus  @default(PENDING)
+  /// 生成锚点消息 ID。
+  anchorMessageId   Int?                   @map("anchor_message_id")
+  /// 重试目标消息 ID。
+  retryTargetId     Int?                   @map("retry_target_id")
+  /// 前端幂等键。
+  clientRequestId   String?                @map("client_request_id") @db.VarChar(64)
+  /// Agent 循环轮数。
+  iterationCount    Int                    @default(0) @map("iteration_count")
+  /// 最大 Agent 循环轮数。
+  maxIterations     Int                    @default(8) @map("max_iterations")
+  /// 失败错误码。
+  errorCode         String?                @map("error_code") @db.VarChar(64)
+  /// 失败错误摘要。
+  errorMessage      String?                @map("error_message") @db.VarChar(500)
+  /// 聚合 token 用量。
+  tokenUsage        Json?                  @map("token_usage")
+  /// 本次生成选择的上下文素材 ID。
+  contextItemIds    Json?                  @map("context_item_ids")
+  /// 开始时间。
+  startedAt         DateTime?              @map("started_at")
+  /// 结束时间。
+  finishedAt        DateTime?              @map("finished_at")
+  /// 创建时间。
+  createdAt         DateTime               @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+  /// 所属会话。
+  conversation      AiConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// 归属用户。
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 关联消息。
+  messages          AiMessage[]
+
+  @@index([conversationId, createdAt])
+  @@index([userId, status, createdAt])
+  @@index([conversationId, clientRequestId])
+  @@index([anchorMessageId])
+  @@index([retryTargetId])
+  @@map("ai_generation_jobs")
+}
+
+/// AI 图片生成任务。
+model AiImageGenerationJob {
+  /// 自增主键。
+  id                Int                         @id @default(autoincrement())
+  /// 归属用户 ID。
+  userId            Int                         @map("user_id")
+  /// 使用的模型槽位 ID。
+  modelId           Int                         @map("model_id")
+  /// 任务状态。
+  status            AiImageGenerationJobStatus  @default(PENDING)
+  /// 前端幂等键。
+  clientRequestId   String?                     @map("client_request_id") @db.VarChar(64)
+  /// 原始提示词。
+  prompt            String                      @db.Text
+  /// 后端装配后的提示词哈希。
+  promptHash        String                      @map("prompt_hash") @db.Char(64)
+  /// 作品上下文弱引用。
+  metadata          Json?
+  /// 生成选项。
+  options           Json?
+  /// 图片结果。
+  result            Json?
+  /// 失败错误码。
+  errorCode         String?                     @map("error_code") @db.VarChar(64)
+  /// 失败错误摘要。
+  errorMessage      String?                     @map("error_message") @db.VarChar(500)
+  /// 开始时间。
+  startedAt         DateTime?                   @map("started_at")
+  /// 结束时间。
+  finishedAt        DateTime?                   @map("finished_at")
+  /// 创建时间。
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+  /// 归属用户。
+  user              User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+  @@index([userId, clientRequestId])
+  @@map("ai_image_generation_jobs")
+}
+
+/// 用户模型偏好设置。
+model UserModelState {
+  /// 用户 ID，主键（每用户一条记录）。
+  userId      Int       @id @map("user_id")
+  /// 当前选用的模型槽位 ID。
+  modelId     Int       @map("model_id")
+  /// 用户自定义温度。
+  temperature Decimal?  @map("temperature") @db.Decimal(3, 2)
+  /// 更新时间。
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  /// 所属用户，级联删除。
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_model_states")
+}
+
+/// 用户提示词偏好设置（每用户每分类一条记录）。
+model UserPromptState {
+  /// 用户 ID。
+  userId           Int       @map("user_id")
+  /// 提示词分类 ID。
+  categoryId       Int       @map("category_id")
+  /// 该分类下上次选择的提示词模板 ID。
+  promptTemplateId Int?      @map("prompt_template_id")
+  /// 更新时间。
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  /// 所属用户，级联删除。
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+  @@map("user_prompt_states")
 }

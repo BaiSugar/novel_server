@@ -235,7 +235,12 @@ export async function refresh(refreshToken: string): Promise<AuthResult> {
 
   return {
     user: stored.user,
-    tokens: await issueTokens(stored.userId, stored.user.role, stored.user.tokenVersion, stored.family),
+    tokens: await issueTokens(
+      stored.userId,
+      stored.user.role,
+      stored.user.tokenVersion,
+      stored.family,
+    ),
   };
 }
 
@@ -278,7 +283,12 @@ export async function getCurrentUserByAccessToken(
     },
   });
 
-  if (!user || user.status !== UserStatus.ACTIVE || payload.tv !== user.tokenVersion) return null;
+  if (
+    !user ||
+    user.status !== UserStatus.ACTIVE ||
+    payload.tv !== user.tokenVersion
+  )
+    return null;
   return user;
 }
 

@@ -27,7 +27,9 @@ export default $g.ctrl((app) =>
     .get(
       "books/:bookId",
       async ({ currentUser, params }) =>
-        $g.success(await NovelService.detail(Number(params.bookId), currentUser!.id)),
+        $g.success(
+          await NovelService.detail(Number(params.bookId), currentUser!.id),
+        ),
       {
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
@@ -36,7 +38,10 @@ export default $g.ctrl((app) =>
     .post(
       "books",
       async ({ currentUser, body }) =>
-        $g.success(await NovelService.create(currentUser!.id, body), "创建成功"),
+        $g.success(
+          await NovelService.create(currentUser!.id, body),
+          "创建成功",
+        ),
       {
         audit: { category: "novel", action: "create" },
         requireAuth: true,
@@ -51,7 +56,11 @@ export default $g.ctrl((app) =>
       "books/:bookId",
       async ({ currentUser, params, body }) =>
         $g.success(
-          await NovelService.update(Number(params.bookId), currentUser!.id, body),
+          await NovelService.update(
+            Number(params.bookId),
+            currentUser!.id,
+            body,
+          ),
           "更新成功",
         ),
       {
@@ -69,7 +78,11 @@ export default $g.ctrl((app) =>
       "books/:bookId/archive",
       async ({ currentUser, params, body }) =>
         $g.success(
-          await NovelService.toggleArchive(Number(params.bookId), currentUser!.id, body.archived),
+          await NovelService.toggleArchive(
+            Number(params.bookId),
+            currentUser!.id,
+            body.archived,
+          ),
         ),
       {
         audit: { category: "novel", action: "archive" },
@@ -93,7 +106,10 @@ export default $g.ctrl((app) =>
     .post(
       "books/:bookId/restore",
       async ({ currentUser, params }) =>
-        $g.success(await NovelService.restore(Number(params.bookId), currentUser!.id), "已恢复"),
+        $g.success(
+          await NovelService.restore(Number(params.bookId), currentUser!.id),
+          "已恢复",
+        ),
       {
         audit: { category: "novel", action: "restore" },
         requireAuth: true,
@@ -103,7 +119,10 @@ export default $g.ctrl((app) =>
     .delete(
       "books/:bookId/permanent",
       async ({ currentUser, params }) => {
-        await NovelService.permanentDelete(Number(params.bookId), currentUser!.id);
+        await NovelService.permanentDelete(
+          Number(params.bookId),
+          currentUser!.id,
+        );
         return $g.success(null, "已永久删除");
       },
       {

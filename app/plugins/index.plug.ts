@@ -1,6 +1,6 @@
-import { cors } from "@elysiajs/cors";
 import { openapi } from "@elysia/openapi";
 import { staticPlugin } from "@elysia/static";
+import { cors } from "@elysiajs/cors";
 import { Elysia } from "elysia";
 import routes from "@/support/generated/routes";
 import plug_controller from "./controller.plug";
@@ -11,7 +11,10 @@ import plug_controller from "./controller.plug";
  */
 function buildOrigins(): string | string[] {
   const raw = process.env.FRONTEND_ORIGIN ?? "http://localhost:3000";
-  const origins = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const origins = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return origins.length === 1 ? origins[0]! : origins;
 }
 

@@ -25,7 +25,15 @@ import { join } from "node:path";
 // ─── 类型 ────────────────────────────────────────────────────────────────────
 
 /** 审计日志类别。 */
-export type AuditCategory = "auth" | "novel" | "prompt" | "security" | "system";
+export type AuditCategory =
+  | "auth"
+  | "novel"
+  | "prompt"
+  | "prompt_category"
+  | "creative_tool"
+  | "ai"
+  | "security"
+  | "system";
 
 /** 审计日志条目。 */
 export interface AuditEntry {
@@ -81,7 +89,9 @@ function resolveCurrentFile(dir: string, currentPath: string): string {
   if (currentPath && existsSync(currentPath)) {
     try {
       if (statSync(currentPath).size < MAX_FILE_BYTES) return currentPath;
-    } catch { /* stat 失败则创建新文件 */ }
+    } catch {
+      /* stat 失败则创建新文件 */
+    }
   }
   return join(dir, `${timestampName()}.log`);
 }
@@ -184,6 +194,32 @@ class AuditLogger {
     this.write({
       timestamp: new Date().toISOString(),
       category: "prompt",
+      action,
+      userId,
+      requestId,
+      ip,
+      data,
+    });
+  }
+
+  /**
+   * 便捷方法：记录 AI 生成事件。
+   * @param action 动作。
+   * @param userId 用户 ID。
+   * @param requestId 请求追踪 ID。
+   * @param ip 客户端 IP。
+   * @param data 额外数据。
+   */
+  ai(
+    action: string,
+    userId: number,
+    requestId: string,
+    ip: string,
+    data?: Record<string, unknown>,
+  ): void {
+    this.write({
+      timestamp: new Date().toISOString(),
+      category: "ai",
       action,
       userId,
       requestId,

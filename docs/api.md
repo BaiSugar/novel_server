@@ -1,6 +1,6 @@
 # 后端 API 对接文档
 
-> 最后更新：2026-05-10  
+> 最后更新：2026-05-13  
 > 基础地址：`http://localhost:4000`（开发环境，由 `.env` PORT 配置）
 
 ---
@@ -41,6 +41,8 @@
 | 404  | `NOT_FOUND`        | 资源不存在                               |
 | 409  | `CONFLICT`         | 资源冲突                                 |
 | 422  | `VALIDATION_ERROR` | 字段校验失败（`details` 含完整错误列表） |
+| 499  | `CLIENT_DISCONNECTED` | SSE / 上游请求中断                 |
+| 503  | `MODEL_UNAVAILABLE` | AI 模型槽位或 Provider 暂不可用      |
 | 500  | `INTERNAL_ERROR`   | 服务端异常                               |
 
 ### 鉴权
@@ -592,7 +594,8 @@ GET /v1/prompts
 | `pageSize` | number                                              | 每页条数，默认 20   |
 | `privacy`  | `PRIVATE` \| `SHARED` \| `AUTHORIZED`               | 按隐私设置筛选      |
 | `approved` | boolean                                             | 按审核状态筛选      |
-| `keyword`  | string                                              | 按名称/介绍模糊搜索 |
+| `keyword`    | string                                              | 按名称/介绍模糊搜索 |
+| `categoryId` | number                                              | 按提示词分类筛选；不传或 0 表示全部 |
 
 **响应：** `ApiEnvelope<PaginatedList<PromptTemplateListItem>>`
 
@@ -607,6 +610,8 @@ GET /v1/prompts
         "name": "奇幻开篇生成器",
         "description": "适合西幻世界观的开篇提示词",
         "privacy": "SHARED",
+        "categoryId": 1,
+        "category": "脑洞生成器",
         "usageGuide": "填入世界观关键词后直接生成",
         "isApproved": true,
         "versionCount": 3,
@@ -631,7 +636,7 @@ GET /v1/prompts/:id
 | ------- | ------ | ---------- |
 | `:id`   | number | 提示词 ID  |
 
-> 非作者本人查看时，`content` 字段不返回（`presetOptions` 用于前端渲染输入表单，始终返回）。前端仅在编辑模式（作者本人操作）下获取完整提示词内容。
+> 作者本人进入编辑页或查看历史版本时返回 `content`；非作者本人查看时，`content` 字段不返回（`presetOptions` 用于前端渲染输入表单，始终返回）。生成交互、消息记录、任务响应和 AI 工具结果不返回提示词正文。
 
 **响应：** `ApiEnvelope<PromptTemplate>`
 
@@ -697,6 +702,7 @@ POST /v1/prompts
 | `description`   | string                                              | 否   | 提示词介绍                    |
 | `privacy`       | `PRIVATE` \| `SHARED` \| `AUTHORIZED`               | 是   | 隐私设置                      |
 | `usageGuide`    | string                                              | 否   | 使用方法（简短说明）          |
+| `categoryId`    | number \| null                                      | 否   | 所属提示词分类 ID；null 表示未分类 |
 
 **响应：** `ApiEnvelope<PromptTemplate>`
 
@@ -784,6 +790,819 @@ POST /v1/prompts/:id/versions/:versionId/restore
 
 **响应：** `ApiEnvelope<PromptTemplate>`
 
+### 5.10 提示词分类列表
+
+```
+GET /v1/prompts/categories
+```
+
+> 提示词分类是全站唯一的分类来源，提示词广场与创意工具箱都复用这同一份数据。
+
+**响应：** `ApiEnvelope<CategoryItem[]>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": [
+    { "id": 1, "name": "脑洞生成器", "promptCount": 12 },
+    { "id": 2, "name": "书名生成器", "promptCount": 8 }
+  ]
+}
+```
+
+### 5.11 创建提示词分类
+
+> 需要 `prompt.category.manage` 权限（管理员）。
+
+```
+POST /v1/prompts/categories
+```
+
+**请求体：**
+
+| 字段    | 类型   | 必填 | 说明                   |
+| ------- | ------ | ---- | ---------------------- |
+| `name`  | string | 是   | 分类显示名，≤64 字符   |
+| `order` | number | 否   | 排序序号，默认 0       |
+
+**响应：** `ApiEnvelope<CategoryItem>`
+
+### 5.12 更新提示词分类
+
+> 需要 `prompt.category.manage` 权限（管理员）。
+
+```
+PUT /v1/prompts/categories/:categoryId
+```
+
+**请求体：** 同 5.11，全部字段可选。
+
+**响应：** `ApiEnvelope<CategoryItem>`
+
+### 5.13 删除提示词分类
+
+> 需要 `prompt.category.manage` 权限（管理员）。删除后，引用该分类的提示词与创意工具的 `categoryId` 会被置空。
+
+```
+DELETE /v1/prompts/categories/:categoryId
+```
+
+**响应：** `ApiEnvelope<boolean>`
+
+---
+
+## 6. 创意工具 API
+
+> 路由前缀 `/v1/creative-tools`，全部需要登录。
+>
+> 创意工具箱不再维护独立分类，直接复用提示词分类：
+> `GET /v1/prompts/categories`。
+
+### 6.1 创意工具列表
+
+```
+GET /v1/creative-tools
+```
+
+**查询参数：**
+
+| 参数        | 类型   | 说明                                |
+| ----------- | ------ | ----------------------------------- |
+| `categoryId` | number | 按提示词分类筛选；不传或 0 表示全部 |
+
+**响应：** `ApiEnvelope<CreativeToolApiItem[]>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": [
+    {
+      "id": 1,
+      "name": "脑洞生成器",
+      "description": "脑洞生成器工具",
+      "icon": "SPARKLES",
+      "categoryId": 1,
+      "category": "脑洞生成器",
+      "isNew": false
+    }
+  ]
+}
+```
+
+### 6.2 创建创意工具
+
+```
+POST /v1/creative-tools
+```
+
+**请求体：**
+
+| 字段         | 类型            | 必填 | 说明                     |
+| ------------ | --------------- | ---- | ------------------------ |
+| `name`       | string          | 是   | 工具名称，≤128 字符      |
+| `description`| string          | 是   | 工具描述，≤500 字符      |
+| `icon`       | CreativeToolIcon | 是   | 工具图标                 |
+| `categoryId` | number \| null  | 否   | 所属提示词分类 ID        |
+| `isNew`      | boolean         | 否   | 是否显示 NEW 角标        |
+| `order`      | number          | 否   | 排序序号                 |
+
+**响应：** `ApiEnvelope<CreativeToolApiItem>`
+
+### 6.3 更新创意工具
+
+```
+PUT /v1/creative-tools/:id
+```
+
+**请求体：** 同 6.2，全部字段可选。
+
+**响应：** `ApiEnvelope<CreativeToolApiItem>`
+
+### 6.4 删除创意工具
+
+```
+DELETE /v1/creative-tools/:id
+```
+
+**响应：** `ApiEnvelope<boolean>`
+
+---
+
+## 7. AI 系统 API
+
+> 路由涉及三个前缀：`/v1/ai/models`（前端模型）、`/v1/ai/conversations`（会话与消息）、`/v1/ai/generation`（文本生成 SSE）、`/v1/ai/images`（图片生成），全部需要登录。
+> 管理端路由前缀 `/v1/admin/ai`，需要 `ADMIN` 角色与 `ai.model.manage` 权限。
+
+### 7.1 前端模型
+
+> 路由前缀 `/v1/ai/models`，全部需要登录。模型槽位返回面向前端的展示字段，不包含 `apiKey`、`baseUrl`、`provider account` 等后端敏感配置。
+
+#### 7.1.1 模型列表
+
+```
+GET /v1/ai/models
+```
+
+**查询参数：** 无。
+
+**响应：** `ApiEnvelope<AiModelPublicItem[]>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": [
+    {
+      "id": 1,
+      "name": "轻量版",
+      "description": "适合短篇脑洞、速写",
+      "temperature": 0.7,
+      "tags": ["free", "hot"],
+      "status": "SMOOTH"
+    },
+    {
+      "id": 2,
+      "name": "创作旗舰",
+      "description": "长篇叙事推荐",
+      "temperature": 0.9,
+      "tags": ["hot"],
+      "status": "CONGESTED"
+    }
+  ]
+}
+```
+
+`status` 取值：`SMOOTH`（流畅）/ `CONGESTED`（拥堵）/ `OUTAGE`（故障）。`OUTAGE` 的条目仍会返回，前端灰化即可。
+`enabled=false` 的槽位不出现；列表按 `sortOrder` 升序，二级按 `id` 升序。
+
+#### 7.1.2 模型详情
+
+```
+GET /v1/ai/models/:id
+```
+
+| 参数  | 类型   | 说明    |
+| ----- | ------ | ------- |
+| `:id` | number | 槽位 ID |
+
+**响应：** `ApiEnvelope<AiModelPublicItem>`，结构同 7.1.1。
+
+**错误：** 槽位不存在或未启用时返回 `404 / NOT_FOUND`。
+
+---
+
+### 7.2 会话管理
+
+> 路由前缀 `/v1/ai/conversations`，需要 `ai.conversation.manage` 权限。service 层统一校验 `conversationId` 归属当前用户。
+
+#### 7.2.1 创建会话
+
+```
+POST /v1/ai/conversations
+```
+
+**请求体：**
+
+| 字段           | 类型                   | 必填 | 说明                                                 |
+| -------------- | ---------------------- | ---- | ---------------------------------------------------- |
+| `title`        | string                 | 否   | 会话标题，≤128 字符；不传时由首条用户消息前 32 字派生 |
+| `mode`         | `STANDARD` \| `AGENT`  | 否   | 会话默认模式，默认 `STANDARD`                        |
+| `modelId`      | number                 | 是   | 槽位 ID，必须存在且 `enabled=true`                    |
+| `systemPrompt` | string \| null         | 否   | 会话级系统提示词，≤8000 字符                         |
+| `metadata`     | object \| null         | 否   | 仅允许白名单键：`novelId` / `chapterId` / `promptTemplateId` / `scene` |
+
+```json
+{
+  "title": "新对话",
+  "mode": "AGENT",
+  "modelId": 1,
+  "systemPrompt": null,
+  "metadata": { "novelId": 1 }
+}
+```
+
+**响应：** `ApiEnvelope<AiConversationItem>`，`message` 为 "创建成功"。
+
+**错误：** `404 / NOT_FOUND`（槽位不存在或未启用）、`422 / VALIDATION_ERROR`。
+
+#### 7.2.2 会话列表
+
+```
+GET /v1/ai/conversations
+```
+
+**查询参数：**
+
+| 参数        | 类型               | 默认     | 说明                                |
+| ----------- | ------------------ | -------- | ----------------------------------- |
+| `page`      | number             | 1        | 页码                                |
+| `pageSize`  | number             | 20       | 每页条数                            |
+| `status`    | `ACTIVE` \| `ARCHIVED` | —    | 按状态过滤；不传返回全部非 DELETED  |
+| `novelId`   | number             | —        | 按 `metadata.novelId` 精确匹配      |
+| `chapterId` | number             | —        | 按 `metadata.chapterId` 精确匹配    |
+| `keyword`   | string             | —        | 模糊匹配 `title`                    |
+
+**响应：** `ApiEnvelope<{ items: AiConversationItem[], total, page, pageSize }>`
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "userId": 1,
+        "title": "新对话",
+        "mode": "AGENT",
+        "modelId": 1,
+        "systemPrompt": null,
+        "metadata": { "novelId": 1 },
+        "status": "ACTIVE",
+        "messageCount": 5,
+        "lastMessageAt": "2026-05-11T10:30:00.000Z",
+        "createdAt": "2026-05-11T10:00:00.000Z",
+        "updatedAt": "2026-05-11T10:30:00.000Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+`DELETED` 状态的会话永不返回。
+
+#### 7.2.3 会话详情
+
+```
+GET /v1/ai/conversations/:id
+```
+
+| 参数  | 类型   | 说明    |
+| ----- | ------ | ------- |
+| `:id` | number | 会话 ID |
+
+**响应：** `ApiEnvelope<AiConversationItem>`（含 `modelSlot` 的展示字段快照：`name` / `status`）。
+
+**错误：** `404 / NOT_FOUND`（不存在或非归属当前用户）。
+
+#### 7.2.4 更新会话
+
+```
+PATCH /v1/ai/conversations/:id
+```
+
+**请求体：** 同 7.2.1，全部字段可选，至少传一项。
+
+**响应：** `ApiEnvelope<AiConversationItem>`，`message` 为 "更新成功"。
+
+**错误：** `404 / NOT_FOUND`、`422 / VALIDATION_ERROR`。
+
+#### 7.2.5 软删除会话
+
+```
+DELETE /v1/ai/conversations/:id
+```
+
+将会话 `status` 置为 `DELETED`，后续所有查询均过滤。保留审计链，不物理删除。
+
+**响应：** `ApiEnvelope<boolean>`，`message` 为 "删除成功"。
+
+#### 7.2.6 归档/恢复
+
+```
+POST /v1/ai/conversations/:id/archive
+```
+
+**请求体：**
+
+| 字段       | 类型    | 必填 | 说明                                          |
+| ---------- | ------- | ---- | --------------------------------------------- |
+| `archived` | boolean | 是   | `true` → `ARCHIVED`，`false` → 恢复为 `ACTIVE` |
+
+**响应：** `ApiEnvelope<AiConversationItem>`，`message` 为 "操作成功"。
+
+---
+
+### 7.3 消息管理
+
+> 路由前缀 `/v1/ai/conversations`，需要 `ai.conversation.manage` 权限。
+
+#### 7.3.1 消息列表
+
+```
+GET /v1/ai/conversations/:id/messages
+```
+
+**查询参数：**
+
+| 参数                | 类型    | 默认  | 说明                                    |
+| ------------------- | ------- | ----- | --------------------------------------- |
+| `cursor`            | number  | —     | 游标分页起始消息 ID（取该 ID 之后的消息） |
+| `limit`             | number  | 50    | 每页条数，最大 200                       |
+| `includeSuperseded` | boolean | false | 是否包含被替代的消息                      |
+
+**响应：** `ApiEnvelope<{ items: AiMessageItem[], cursor: number | null, hasMore: boolean }>`
+
+> 消息列表不返回后端渲染后的用户提示词和工具结果正文：`USER` / `TOOL` 消息的 `content` 为空，并带 `contentRedacted: true`；`ASSISTANT` 消息正文正常返回。
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "items": [
+      {
+        "id": 10,
+        "conversationId": 1,
+        "parentMessageId": 9,
+        "role": "ASSISTANT",
+        "status": "ACTIVE",
+        "content": "好的，我来为你续写这段剧情...",
+        "toolCalls": null,
+        "toolCallId": null,
+        "toolName": null,
+        "tokenUsage": { "prompt": 1024, "completion": 512, "total": 1536 },
+        "modelId": 1,
+        "jobId": 3,
+        "seq": 4,
+        "createdAt": "2026-05-11T10:30:00.000Z",
+        "updatedAt": "2026-05-11T10:30:00.000Z"
+      }
+    ],
+    "cursor": 10,
+    "hasMore": false
+  }
+}
+```
+
+消息按 `seq` 升序排列；`role` 取值：`SYSTEM` / `USER` / `ASSISTANT` / `TOOL`；`status` 取值：`ACTIVE` / `PENDING` / `SUPERSEDED` / `FAILED`。
+
+#### 7.3.2 删除用户消息
+
+```
+DELETE /v1/ai/conversations/:id/messages/:messageId
+```
+
+**约束：**
+- 仅允许 `role=USER` 且 `status=ACTIVE` 的消息被删除。
+- 级联：将目标消息及其后代全部标记为 `SUPERSEDED`（不物理删除，保留审计链）。
+
+**响应：** `ApiEnvelope<boolean>`，`message` 为 "删除成功"。
+
+**错误：** `409 / CONFLICT`（非 USER 消息或已 SUPERSEDED）。
+
+---
+
+### 7.4 文本生成 SSE
+
+> 路由前缀 `/v1/ai/generation`，需要 `ai.generation.invoke` 权限。生成入口返回 `text/event-stream`，前端应使用 `fetch` + `ReadableStream` 消费（`EventSource` 不支持自定义请求头）；断开连接会通过 `AbortSignal` 中断后端生成链路。
+> 频率限制：60 秒内最多 20 次请求。
+
+#### 7.4.1 创建并启动生成（SSE）
+
+```
+POST /v1/ai/generation/stream
+```
+
+**请求体：**
+
+前端只传生成意图和业务输入：`mode`、`modelId` 必填；`promptTemplateId` 与 `promptInputs` 是主入口；后端负责读取提示词模板、替换 `{{变量}}`，并只把用户明确选择的 `contextItemIds` 解析为模型上下文。`metadata.novelId` / `metadata.chapterId` 只表示业务关联和筛选条件，不自动注入作品简介或章节正文。`conversationId` 可选，未传时后端会创建会话，并通过 `job.created` SSE 事件返回 `conversationId`。`userMessage` 仅作为兼容补充输入使用。
+
+| 字段               | 类型                   | 必填 | 说明                                                         |
+| ------------------ | ---------------------- | ---- | ------------------------------------------------------------ |
+| `mode`             | `STANDARD` \| `AGENT`  | 是   | 生成模式                                                     |
+| `modelId`          | number                 | 是   | 前端选择的模型槽位 ID                                        |
+| `conversationId`   | number                 | 否   | 已有会话 ID；未传时由后端创建新会话                          |
+| `promptTemplateId` | number                 | 否   | 提示词模板 ID；未传 `userMessage` 时必须提供，可从会话 `metadata.promptTemplateId` 兜底 |
+| `promptInputs`     | Record<string, unknown> | 否   | 提示词变量键值对，例如模板 `写{{类型}}的物品{{数量}}` 对应 `{ "类型": "玄幻", "数量": 3 }` |
+| `userMessage`      | string                 | 否   | 兼容补充输入，1~16000 字符；会追加到模板渲染结果之后          |
+| `contextItemIds`   | number[]               | 否   | 用户明确选择要注入模型的上下文素材 ID；生成请求不传、不依赖硬编码 `type` |
+| `metadata`         | object                 | 否   | 业务引用：`novelId` / `chapterId` / `promptTemplateId` / `scene`；不自动注入模型上下文 |
+
+```json
+{
+  "mode": "AGENT",
+  "modelId": 1,
+  "promptTemplateId": 1,
+  "promptInputs": { "类型": "玄幻", "数量": 3 },
+  "contextItemIds": [101, 102, 205],
+  "metadata": { "novelId": 1, "chapterId": 3 }
+}
+```
+
+运行控制归后端：`temperature` 来自模型槽位/模型定义配置，AGENT 工具集合由后端内部注册表开放，最大迭代轮数由后端固定控制。文本生成入口不要求前端传幂等键。
+
+**响应：** HTTP 200，`Content-Type: text/event-stream`。
+
+**错误前置（SSE 建立前以 JSON 返回）：**
+
+| HTTP | code                | 说明                              |
+| ---- | ------------------- | --------------------------------- |
+| 404  | `NOT_FOUND`         | 会话不存在、非归属或 modelId 不合法 |
+| 422  | `VALIDATION_ERROR`  | schema 校验失败                   |
+| 503  | `MODEL_UNAVAILABLE` | 槽位故障（未绑定/禁用/全量熔断）   |
+
+**SSE 事件类型：**
+
+| 事件                | 触发时机                     | data 字段                                                    |
+| ------------------- | ---------------------------- | ------------------------------------------------------------ |
+| `job.created`       | 任务创建成功                 | `{ jobId, conversationId }`                                  |
+| `message.delta`     | 模型流式输出文本片段（N 次） | `{ jobId, messageId, delta: string }`                        |
+| `message.completed` | 一条 assistant 消息完成      | `{ jobId, messageId, content, usage?, toolCalls? }`          |
+| `tool.call`         | AGENT 模式工具调用（M 次）   | `{ jobId, toolCallId, name, arguments }`                     |
+| `tool.result`       | 工具执行结果（M 次）         | `{ jobId, toolCallId, name, result }`                        |
+| `job.iteration`     | AGENT 每轮循环结束           | `{ jobId, iteration, maxIterations }`                        |
+| `job.succeeded`     | 任务成功完成                 | `{ jobId, result? }`                                         |
+| `job.failed`        | 任务失败                     | `{ jobId, errorCode, message }`                              |
+| `job.canceled`      | 任务被取消                   | `{ jobId }`                                                  |
+| `keepalive`         | 心跳保活                     | `{ ts }`                                                     |
+
+提示词正文是敏感信息：SSE 不发送后端渲染后的 `USER` 提示词；`prompt.detail` 等 AGENT 工具结果只返回模板元数据和 `presetOptions`，不返回 `content`。
+
+**上下文选择约定：**
+
+- `contextItemIds` 来自后端提供的可选上下文素材列表，不由前端自行构造。
+- 生成请求不传 `type`，也不传“人物卡/词条卡/备忘录”等硬编码枚举。
+- 后端根据 `ContextItem.sourceId` 关联的 `ContextSource` 配置校验、排序并读取 `renderedText` 注入模型上下文。
+- `ContextSource` 是数据库配置；新增“世界观卡”“伏笔卡”等来源不应影响生成接口。
+
+**可选上下文项列表（目标接口，待上下文素材域落地）：**
+
+```
+GET /v1/ai/context-items
+```
+
+| 参数      | 类型   | 默认 | 说明                                      |
+| --------- | ------ | ---- | ----------------------------------------- |
+| `novelId` | number | —    | 可选；返回全局可用素材和该作品绑定的素材 |
+| `keyword` | string | —    | 可选；按标题/摘要搜索                    |
+
+响应项示例：
+
+```json
+{
+  "code": "SUCCESS",
+  "data": [
+    {
+      "id": 101,
+      "source": { "id": 1, "name": "人物卡" },
+      "title": "林秋",
+      "summary": "男主，阵修，性格冷静",
+      "global": false,
+      "bound": true
+    }
+  ]
+}
+```
+
+**SSE 典型 STANDARD 流程：**
+
+```
+job.created → message.delta × N → message.completed → job.succeeded
+```
+
+**SSE 典型 AGENT 流程：**
+
+```
+job.created → message.delta × N → tool.call → tool.result → job.iteration
+→ message.delta × N → message.completed → job.succeeded
+```
+
+若达到 `maxIterations` 仍未收敛 → `job.failed`，`errorCode=AGENT_ITERATION_EXCEEDED`。
+
+**AGENT 工具白名单（当前已实现，均只读且按 userId 校验归属）：**
+
+| 工具名          | 说明                     |
+| --------------- | ------------------------ |
+| `novel.list`    | 列出当前用户作品列表     |
+| `novel.detail`  | 按 bookId 获取作品详情   |
+| `chapter.list`  | 按 bookId 列出章节       |
+| `chapter.detail`| 按 chapterId 获取章节详情 |
+| `prompt.list`   | 列出可访问的提示词模板   |
+| `prompt.detail` | 按 id 获取提示词模板详情 |
+
+#### 7.4.2 重试生成（SSE）
+
+```
+POST /v1/ai/generation/:jobId/retry
+```
+
+对指定 assistant 消息重试。服务端行为：
+1. 校验 target 消息归属当前用户且 `status=ACTIVE`；
+2. 将 target 及其后代全部标记为 `SUPERSEDED`；
+3. 以 `target.parentMessageId` 作为锚点创建新 job 并返回 SSE 流。
+
+**URL 参数：** `:jobId` 为被替代消息关联的 jobId（前端从消息上获取）。
+
+**请求体：**
+
+| 字段              | 类型   | 必填 | 说明                       |
+| ----------------- | ------ | ---- | -------------------------- |
+| `targetMessageId` | number | 是   | 被重试的 assistant 消息 ID |
+
+**响应：** 同 7.4.1 的 SSE 事件流。
+
+**错误：** `404 / NOT_FOUND`、`422 / VALIDATION_ERROR`。
+
+#### 7.4.3 取消任务
+
+```
+POST /v1/ai/generation/:jobId/cancel
+```
+
+仅允许 `status IN (PENDING, RUNNING)` 的任务。
+
+**响应：** `ApiEnvelope<AiGenerationJobItem>`，`message` 为 "已取消"。
+
+**效果：**
+- 触发对应 job 的 `AbortSignal`，正在执行的模型调用和工具调用在可取消边界退出；
+- 仍处于 `PENDING` 的 assistant 消息被标记为 `FAILED`，正文为 "已取消"；
+- 若 SSE 请求方主动断开，`request.signal` 贯通到模型 adapter，任务按 `CLIENT_DISCONNECTED` 失败。
+
+**错误：** `409 / CONFLICT`（任务已终态）。
+
+#### 7.4.4 查询任务状态
+
+```
+GET /v1/ai/generation/:jobId
+```
+
+**响应：** `ApiEnvelope<AiGenerationJobItem>`（不含消息正文，仅状态/错误码/用量）。
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "id": 5,
+    "conversationId": 1,
+    "userId": 1,
+    "mode": "STANDARD",
+    "modelId": 1,
+    "status": "SUCCEEDED",
+    "anchorMessageId": 4,
+    "retryTargetId": null,
+    "clientRequestId": null,
+    "iterationCount": 1,
+    "maxIterations": 8,
+    "errorCode": null,
+    "errorMessage": null,
+    "tokenUsage": { "prompt": 2048, "completion": 1024, "total": 3072 },
+    "startedAt": "2026-05-11T10:30:00.000Z",
+    "finishedAt": "2026-05-11T10:30:15.000Z",
+    "createdAt": "2026-05-11T10:30:00.000Z",
+    "updatedAt": "2026-05-11T10:30:15.000Z"
+  }
+}
+```
+
+**错误：** `404 / NOT_FOUND`。
+
+---
+
+### 7.5 图片生成
+
+> 路由前缀 `/v1/ai/images`，需要 `ai.image.generate` 权限。图片生成走独立任务表，返回普通 JSON（非 SSE）。
+> 频率限制：60 秒内最多 10 次请求。
+
+#### 7.5.1 创建图片生成任务
+
+```
+POST /v1/ai/images
+```
+
+**请求体：**
+
+前端只传结构化输入；后端负责读取提示词模板并组装图片最终 prompt。最终 prompt 只在后端内部使用，响应不返回正文；`prompt` 仅作为兼容补充描述使用。
+
+| 字段               | 类型                   | 必填 | 说明                                    |
+| ------------------ | ---------------------- | ---- | --------------------------------------- |
+| `modelId`          | number                 | 是   | 槽位 ID，必须支持 `IMAGE_GENERATION`     |
+| `promptTemplateId` | number                 | 否   | 提示词模板 ID；未传 `prompt` 时必须提供  |
+| `promptInputs`     | Record<string, unknown> | 否   | 提示词变量键值对                        |
+| `prompt`           | string                 | 否   | 兼容补充图片描述，1~16000 字符          |
+| `metadata`         | object                 | 否   | 业务引用                                |
+| `size`             | string                 | 否   | 尺寸，如 `"1024x1024"`                  |
+| `quality`          | string                 | 否   | 质量，如 `"standard"` / `"hd"`          |
+| `n`                | number                 | 否   | 生成数量                                |
+| `clientRequestId`  | string                 | 否   | 幂等键，≤64 字符                        |
+
+```json
+{
+  "modelId": 1,
+  "promptTemplateId": 2,
+  "promptInputs": { "类型": "奇幻森林", "数量": 1 },
+  "size": "1024x1024",
+  "quality": "hd",
+  "n": 1,
+  "metadata": { "novelId": 1 }
+}
+```
+
+**响应：** `ApiEnvelope<AiImageGenerationJobItem>`，`message` 为 "生成完成"。
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "id": 1,
+    "userId": 1,
+    "modelId": 1,
+    "status": "SUCCEEDED",
+    "clientRequestId": null,
+    "prompt": "",
+    "promptRedacted": true,
+    "promptHash": "a1b2c3...",
+    "metadata": { "novelId": 1 },
+    "options": { "size": "1024x1024", "quality": "hd", "n": 1 },
+    "result": { "urls": ["https://..."] },
+    "errorCode": null,
+    "errorMessage": null,
+    "startedAt": "2026-05-11T10:30:00.000Z",
+    "finishedAt": "2026-05-11T10:30:05.000Z",
+    "createdAt": "2026-05-11T10:30:00.000Z",
+    "updatedAt": "2026-05-11T10:30:05.000Z"
+  }
+}
+```
+
+#### 7.5.2 查询图片任务
+
+```
+GET /v1/ai/images/:jobId
+```
+
+| 参数    | 类型   | 说明       |
+| ------- | ------ | ---------- |
+| `:jobId` | number | 图片任务 ID |
+
+**响应：** `ApiEnvelope<AiImageGenerationJobItem>`，结构同 7.5.1。
+
+**错误：** `404 / NOT_FOUND`。
+
+---
+
+### 7.6 管理端 AI 配置
+
+> 路由前缀 `/v1/admin/ai`，需要 `ai.model.manage` 权限，仅 `ADMIN` 可用。
+> 管理端接口对 `apiKey` 做脱敏，返回 `apiKeyMasked`（如 `sk-****abcd`），明文永不返回。
+> 所有写操作归属 `system` 类审计，永不包含明文 Key。
+
+#### 7.6.1 模型槽位
+
+| 方法   | 路径                          | 说明                                                         |
+| ------ | ----------------------------- | ------------------------------------------------------------ |
+| GET    | `/slots`                      | 列出全部槽位（含 `enabled=false`）                            |
+| POST   | `/slots`                      | 新建槽位；`id` 必填（如 `4`），作为前端后续引用的固定契约     |
+| PUT    | `/slots/:id`                  | 修改槽位元信息                                               |
+| DELETE | `/slots/:id`                  | 删除槽位；若前端仍在用该 ID 会返回 404，需审慎操作            |
+| PUT    | `/slots/:id/bind`             | 换绑底层模型：`{ modelId: number \| null }`，`null` 为解绑    |
+
+**POST / PUT 请求体：**
+
+| 字段                 | 类型                            | 必填       | 说明                                       |
+| -------------------- | ------------------------------- | ---------- | ------------------------------------------ |
+| `id`                 | number                          | POST 必填  | 前端可见的 modelId，正整数                  |
+| `displayName`        | string                          | POST 必填  | ≤64 字符                                   |
+| `description`        | string                          | 否         | ≤500 字符                                  |
+| `tags`               | string[]                        | 否         | 受控集合：`hot` / `free` / `new` / `beta`  |
+| `sortOrder`          | number                          | 否         | 列表排序，默认 0                            |
+| `enabled`            | boolean                         | 否         | 对前端可见，默认 true                       |
+| `failoverStrategy`   | `SEQUENTIAL` \| `ROUND_ROBIN`   | 否         | 账号调度策略，默认 `SEQUENTIAL`             |
+| `defaultTemperature` | number \| null                  | 否         | 0~2，两位小数                               |
+| `boundModelId`       | number \| null                  | 否         | 创建时即可绑定                              |
+
+**响应：** `ApiEnvelope<AiModelSlotAdmin>`（含扁平嵌入的 `boundModel` 与聚合连通性 `status`）。
+
+#### 7.6.2 模型定义
+
+| 方法   | 路径             | 说明                                                        |
+| ------ | ---------------- | ----------------------------------------------------------- |
+| GET    | `/models`        | 分页列表，支持 `platform` / `keyword` 过滤                   |
+| POST   | `/models`        | 创建模型定义                                                 |
+| GET    | `/models/:id`    | 详情                                                        |
+| PUT    | `/models/:id`    | 更新                                                        |
+| DELETE | `/models/:id`    | 删除；被槽位绑定时返回 `409 / CONFLICT`，提示先解绑          |
+
+**POST 必填请求体：**
+
+| 字段                | 类型                              | 说明                                                         |
+| ------------------- | --------------------------------- | ------------------------------------------------------------ |
+| `identifier`        | string                            | 传给底层 API 的模型名，如 `"gpt-4o-mini"`，≤128 字符         |
+| `displayName`       | string                            | 管理端显示名，≤128 字符                                      |
+| `platform`          | string                            | 协议族：`openai` / `anthropic` / `deepseek`，≤32 字符        |
+| `endpoint`          | string                            | 端点类型：`chat.completions` / `responses` / `messages`，≤32 字符 |
+| `contextWindow`     | number                            | 上下文窗口 token 数                                          |
+| `maxOutputTokens`   | number                            | 单次最大输出 token 数                                        |
+| `defaultTemperature`| number                            | 默认温度，0~2                                                |
+
+**可选字段：** `reasoningEffort`（`NONE`/`LOW`/`MEDIUM`/`HIGH`）、`extraParams`、`capabilities`（`TEXT_CHAT`/`TOOL_CALLING`/`STREAMING`/`IMAGE_GENERATION`/`MULTI_MODAL_INPUT`/`JSON_MODE`）、`enabled`。
+
+**响应：** `ApiEnvelope<ModelDefinitionAdmin>`。
+
+#### 7.6.3 Provider 账号
+
+| 方法   | 路径              | 说明                                                        |
+| ------ | ----------------- | ----------------------------------------------------------- |
+| GET    | `/accounts`       | 分页列表，支持 `platform` / `enabled` 过滤                   |
+| POST   | `/accounts`       | 创建账号，`apiKey` 明文入参，服务端加密存储                   |
+| GET    | `/accounts/:id`   | 详情（不返回 Key 明文）                                      |
+| PUT    | `/accounts/:id`   | 更新；`apiKey` 传空字符串视为不改，传非空视为全量替换        |
+| DELETE | `/accounts/:id`   | 删除；被模型绑定时返回 `409 / CONFLICT`，提示先解绑          |
+
+**POST 必填请求体：**
+
+| 字段       | 类型   | 说明                                       |
+| ---------- | ------ | ------------------------------------------ |
+| `platform` | string | 与模型 `platform` 对齐，≤32 字符            |
+| `label`    | string | 管理端显示名，≤64 字符                     |
+| `baseUrl`  | string | 接口基础地址，≤255 字符                     |
+| `apiKey`   | string | 明文 API Key，≤4096 字符，加密后永不返回    |
+
+**可选字段：** `extraHeaders`、`extraParams`、`priority`、`weight`、`enabled`。
+
+**响应：** `ApiEnvelope<ProviderAccountAdmin>`（`apiKeyMasked` 形式，如 `sk-****abcd`）。
+
+#### 7.6.4 模型账号绑定
+
+| 方法   | 路径                                          | 说明                               |
+| ------ | --------------------------------------------- | ---------------------------------- |
+| GET    | `/models/:modelId/accounts`                    | 列出该模型的候选账号                |
+| POST   | `/models/:modelId/accounts`                    | 绑定账号                           |
+| PUT    | `/models/:modelId/accounts/:accountId`          | 调整 `priority` / `enabled`        |
+| DELETE | `/models/:modelId/accounts/:accountId`          | 解绑                               |
+| PUT    | `/models/:modelId/accounts/reorder`             | 批量重排优先级                      |
+
+**POST 请求体：** `{ accountId: number, priority?: number, enabled?: boolean }`
+
+**批量重排请求体：** `{ orders: [{ accountId: number, priority: number }] }`
+
+**响应：** `ApiEnvelope<ModelAccountBindingAdmin[]>`（含扁平嵌入的 `account` 与 `health`）。
+
+#### 7.6.5 健康度
+
+| 方法 | 路径                                | 说明                                |
+| ---- | ----------------------------------- | ----------------------------------- |
+| GET  | `/health`                           | 查询健康度，支持 `modelId` / `accountId` / `platform` 组合过滤 |
+| POST | `/health/:modelId/:accountId/reset` | 清零统计与熔断                      |
+
+**响应：** `ApiEnvelope<ProviderAccountHealthAdmin[]>`（GET）/ `ApiEnvelope<boolean>`（POST reset）。
+
+**健康度字段：**
+
+| 字段                  | 类型           | 说明                              |
+| --------------------- | -------------- | --------------------------------- |
+| `modelId`             | number         | 模型 ID                           |
+| `accountId`           | number         | 账号 ID                           |
+| `successCount`        | number         | 窗口内成功次数                    |
+| `failureCount`        | number         | 窗口内失败次数                    |
+| `p95LatencyMs`        | number \| null | 窗口内 p95 延迟                   |
+| `consecutiveFailures` | number         | 连续失败计数                      |
+| `circuitOpenUntil`    | string \| null | 熔断截止时间                      |
+| `lastSuccessAt`       | string \| null | 最近成功时间                      |
+| `lastFailureAt`       | string \| null | 最近失败时间                      |
+| `lastErrorCode`       | string \| null | 最近错误归类码                    |
+| `updatedAt`           | string         | 更新时间                          |
+
 ---
 
 ## 公共类型
@@ -850,6 +1669,8 @@ POST /v1/prompts/:id/versions/:versionId/restore
 | `description`   | string \| null                                      | 提示词介绍                    |
 | `privacy`       | `"PRIVATE"` \| `"SHARED"` \| `"AUTHORIZED"`       | 隐私设置                      |
 | `usageGuide`    | string \| null                                      | 使用方法（简短说明）          |
+| `categoryId`    | number \| null                                      | 所属提示词分类 ID             |
+| `category`      | string \| null                                      | 所属提示词分类名称             |
 | `isApproved`    | boolean                                             | 是否通过审核                  |
 | `versionCount`  | number                                              | 历史版本数量                  |
 | `createdAt`     | string                                              | 创建时间                      |
@@ -864,11 +1685,226 @@ POST /v1/prompts/:id/versions/:versionId/restore
 | `name`         | string                                              | 提示词名称   |
 | `description`  | string \| null                                      | 提示词介绍   |
 | `privacy`      | `"PRIVATE"` \| `"SHARED"` \| `"AUTHORIZED"`       | 隐私设置     |
-| `usageGuide`   | string \| null                                      | 使用方法     |
-| `isApproved`   | boolean                                             | 是否通过审核 |
-| `versionCount` | number                                              | 版本数量     |
-| `createdAt`    | string                                              | 创建时间     |
-| `updatedAt`    | string                                              | 更新时间     |
+| `usageGuide`   | string \| null                                      | 使用方法                     |
+| `categoryId`   | number \| null                                      | 所属提示词分类 ID             |
+| `category`     | string \| null                                      | 所属提示词分类名称             |
+| `isApproved`   | boolean                                             | 是否通过审核                 |
+| `versionCount` | number                                              | 版本数量                     |
+| `createdAt`    | string                                              | 创建时间                     |
+| `updatedAt`    | string                                              | 更新时间                     |
+
+### CategoryItem
+
+| 字段          | 类型   | 说明                                 |
+| ------------- | ------ | ------------------------------------ |
+| `id`          | number | 分类 ID                              |
+| `name`        | string | 分类显示名                           |
+| `promptCount` | number | 该分类下公开且审核通过的提示词数量   |
+
+### CreativeToolApiItem
+
+| 字段         | 类型              | 说明                     |
+| ------------ | ----------------- | ------------------------ |
+| `id`         | number            | 工具 ID                  |
+| `name`       | string            | 工具名称                 |
+| `description`| string            | 工具描述                 |
+| `icon`       | CreativeToolIcon  | 工具图标                 |
+| `categoryId` | number \| null    | 所属提示词分类 ID        |
+| `category`   | string \| null    | 所属提示词分类名称       |
+| `isNew`      | boolean           | 是否显示 NEW 角标        |
+
+### AiModelPublicItem（前端模型）
+
+| 字段          | 类型                                   | 说明                                |
+| ------------- | -------------------------------------- | ----------------------------------- |
+| `id`          | number                                 | 槽位 ID，对外即"模型 ID"            |
+| `name`        | string                                 | 面向用户展示的模型名称              |
+| `description` | string                                 | 模型描述                            |
+| `temperature` | number                                 | 推荐温度（默认值，调用时可覆盖）    |
+| `tags`        | string[]                               | 受控标签集合：`hot` / `free` / `new` / `beta` |
+| `status`      | `SMOOTH` \| `CONGESTED` \| `OUTAGE`   | 聚合连通性                          |
+
+### AiContextItemOption（可选上下文素材）
+
+| 字段      | 类型                              | 说明                                      |
+| --------- | --------------------------------- | ----------------------------------------- |
+| `id`      | number                            | 上下文素材 ID，用于生成请求的 `contextItemIds` |
+| `source`  | `{ id: number; name: string }`     | 来源展示信息，来自数据库配置的 `ContextSource` |
+| `title`   | string                            | 素材标题                                  |
+| `summary` | string \| null                    | 素材摘要                                  |
+| `global`  | boolean                           | 是否作者级全局可用                        |
+| `bound`   | boolean                           | 查询指定 `novelId` 时，是否已绑定该作品    |
+
+### AiConversationItem（会话）
+
+| 字段           | 类型                                | 说明                                          |
+| -------------- | ----------------------------------- | --------------------------------------------- |
+| `id`           | number                              | 会话 ID                                       |
+| `userId`       | number                              | 归属用户 ID                                   |
+| `title`        | string                              | 会话标题                                      |
+| `mode`         | `STANDARD` \| `AGENT`              | 默认生成模式                                  |
+| `modelId`      | number                              | 默认槽位 ID                                   |
+| `systemPrompt` | string \| null                      | 会话级系统提示词                              |
+| `metadata`     | AiMetadata \| null                  | 业务关联引用                                  |
+| `status`       | `ACTIVE` \| `ARCHIVED` \| `DELETED` | 会话状态                                      |
+| `messageCount` | number                              | 活跃消息数（`SUPERSEDED` 不计入）              |
+| `lastMessageAt`| string \| null                      | 最近一条消息时间                              |
+| `createdAt`    | string                              | 创建时间                                      |
+| `updatedAt`    | string                              | 更新时间                                      |
+
+### AiMessageItem（消息）
+
+| 字段             | 类型                                                     | 说明                   |
+| ---------------- | -------------------------------------------------------- | ---------------------- |
+| `id`             | number                                                   | 消息 ID                |
+| `conversationId` | number                                                   | 归属会话 ID            |
+| `parentMessageId`| number \| null                                           | 父消息 ID；根消息为 null |
+| `role`           | `SYSTEM` \| `USER` \| `ASSISTANT` \| `TOOL`              | 消息角色               |
+| `status`         | `ACTIVE` \| `PENDING` \| `SUPERSEDED` \| `FAILED`       | 消息状态               |
+| `content`        | string                                                   | 消息正文               |
+| `toolCalls`      | object[] \| null                                         | assistant 产出的工具调用列表 |
+| `toolCallId`     | string \| null                                           | 仅 TOOL 角色：回填的 tool_call id |
+| `toolName`       | string \| null                                           | 仅 TOOL 角色：工具名   |
+| `tokenUsage`     | `{ prompt, completion, total }` \| null                  | Token 用量（仅 assistant） |
+| `modelId`        | number \| null                                           | 本次使用的槽位 ID      |
+| `jobId`          | number \| null                                           | 关联的生成任务 ID      |
+| `seq`            | number                                                   | 在所在分支上的顺序号   |
+| `createdAt`      | string                                                   | 创建时间               |
+| `updatedAt`      | string                                                   | 更新时间               |
+
+### AiGenerationJobItem（文本生成任务）
+
+| 字段              | 类型                                                        | 说明                   |
+| ----------------- | ----------------------------------------------------------- | ---------------------- |
+| `id`              | number                                                      | 任务 ID                |
+| `conversationId`  | number                                                      | 归属会话 ID            |
+| `userId`          | number                                                      | 发起用户 ID            |
+| `mode`            | `STANDARD` \| `AGENT`                                       | 生成模式               |
+| `modelId`         | number                                                      | 使用的槽位 ID          |
+| `status`          | `PENDING` \| `RUNNING` \| `SUCCEEDED` \| `FAILED` \| `CANCELED` | 任务状态           |
+| `anchorMessageId` | number \| null                                              | 新消息的父消息锚点     |
+| `retryTargetId`   | number \| null                                              | 被替代的 assistant 消息 ID |
+| `clientRequestId` | string \| null                                              | 预留字段，文本生成入口通常为 null |
+| `iterationCount`  | number                                                      | Agent 循环轮数         |
+| `maxIterations`   | number                                                      | Agent 最大循环数       |
+| `errorCode`       | string \| null                                              | 失败错误码             |
+| `errorMessage`    | string \| null                                              | 错误摘要               |
+| `tokenUsage`      | `{ prompt, completion, total }` \| null                     | 聚合 Token 用量        |
+| `startedAt`       | string \| null                                              | 进入 RUNNING 时间      |
+| `finishedAt`      | string \| null                                              | 进入终态时间           |
+| `createdAt`       | string                                                      | 创建时间               |
+| `updatedAt`       | string                                                      | 更新时间               |
+
+### AiImageGenerationJobItem（图片生成任务）
+
+| 字段             | 类型                             | 说明                |
+| ---------------- | -------------------------------- | ------------------- |
+| `id`             | number                           | 任务 ID             |
+| `userId`         | number                           | 发起用户 ID         |
+| `modelId`        | number                           | 使用的槽位 ID       |
+| `status`         | `PENDING` \| `RUNNING` \| `SUCCEEDED` \| `FAILED` \| `CANCELED` | 任务状态 |
+| `clientRequestId`| string \| null                   | 幂等键              |
+| `prompt`         | string                           | 图片生成提示词      |
+| `promptHash`     | string                           | prompt 的 SHA-256   |
+| `metadata`       | AiMetadata \| null               | 业务关联引用        |
+| `options`        | object \| null                   | 图片参数（size/quality/n） |
+| `result`         | object \| null                   | 生成结果（urls 等） |
+| `errorCode`      | string \| null                   | 失败错误码          |
+| `errorMessage`   | string \| null                   | 错误摘要            |
+| `startedAt`      | string \| null                   | 开始时间            |
+| `finishedAt`     | string \| null                   | 完成时间            |
+| `createdAt`      | string                           | 创建时间            |
+| `updatedAt`      | string                           | 更新时间            |
+
+### AiMetadata
+
+| 字段               | 类型           | 说明             |
+| ------------------ | -------------- | ---------------- |
+| `novelId`          | number         | 关联作品 ID      |
+| `chapterId`        | number         | 关联章节 ID      |
+| `promptTemplateId` | number         | 关联提示词模板 ID |
+| `scene`            | string         | 场景标识         |
+
+### AiModelSlotAdmin（管理端槽位）
+
+| 字段                 | 类型                            | 说明                               |
+| -------------------- | ------------------------------- | ---------------------------------- |
+| `id`                 | number                          | 槽位 ID                            |
+| `displayName`        | string                          | 面向前端展示名                     |
+| `description`        | string                          | 描述                               |
+| `tags`               | string[]                        | 受控标签集合                       |
+| `sortOrder`          | number                          | 排序序号                           |
+| `enabled`            | boolean                         | 是否启用                           |
+| `failoverStrategy`   | `SEQUENTIAL` \| `ROUND_ROBIN`   | 账号调度策略                       |
+| `defaultTemperature` | number \| null                  | 推荐温度                           |
+| `boundModelId`       | number \| null                  | 绑定的模型定义 ID                  |
+| `boundModel`         | ModelDefinitionAdmin \| null    | 绑定的底层模型详情（扁平返回）     |
+| `status`             | `SMOOTH` \| `CONGESTED` \| `OUTAGE` | 聚合连通性                    |
+| `createdAt`          | string                          | 创建时间                           |
+| `updatedAt`          | string                          | 更新时间                           |
+
+### ModelDefinitionAdmin（管理端模型定义）
+
+| 字段                | 类型                              | 说明                               |
+| ------------------- | --------------------------------- | ---------------------------------- |
+| `id`                | number                            | 模型 ID                            |
+| `identifier`        | string                            | 底层 API 模型名                    |
+| `displayName`       | string                            | 管理端显示名                       |
+| `platform`          | string                            | 协议族                             |
+| `endpoint`          | string                            | 端点类型                           |
+| `contextWindow`     | number                            | 上下文窗口 token 数                |
+| `maxOutputTokens`   | number                            | 最大输出 token 数                  |
+| `defaultTemperature`| number                            | 默认温度                           |
+| `reasoningEffort`   | `NONE` \| `LOW` \| `MEDIUM` \| `HIGH` | 推理强度                     |
+| `extraParams`       | object \| null                    | 额外参数                           |
+| `capabilities`      | string[]                          | 能力标签：`TEXT_CHAT` / `TOOL_CALLING` / `STREAMING` / `IMAGE_GENERATION` / `MULTI_MODAL_INPUT` / `JSON_MODE` |
+| `enabled`           | boolean                           | 是否可被槽位绑定                   |
+| `createdAt`         | string                            | 创建时间                           |
+| `updatedAt`         | string                            | 更新时间                           |
+
+### ProviderAccountAdmin（管理端访问账号）
+
+| 字段            | 类型             | 说明                                 |
+| --------------- | ---------------- | ------------------------------------ |
+| `id`            | number           | 账号 ID                              |
+| `platform`      | string           | 协议族                               |
+| `label`         | string           | 管理端显示名                         |
+| `baseUrl`       | string           | 接口基础地址                         |
+| `apiKeyMasked`  | string           | 掩码形式，如 `sk-****abcd`；明文永不返回 |
+| `extraHeaders`  | object \| null   | 额外请求头                           |
+| `extraParams`   | object \| null   | 额外参数                             |
+| `priority`      | number           | SEQUENTIAL 策略排序                   |
+| `weight`        | number           | ROUND_ROBIN 权重                     |
+| `enabled`       | boolean          | 是否启用                             |
+| `createdAt`     | string           | 创建时间                             |
+| `updatedAt`     | string           | 更新时间                             |
+
+### ModelAccountBindingAdmin（管理端模型账号绑定）
+
+| 字段       | 类型                            | 说明                    |
+| ---------- | ------------------------------- | ----------------------- |
+| `modelId`  | number                          | 模型 ID                 |
+| `accountId`| number                          | 账号 ID                 |
+| `priority` | number                          | 当前模型下的候选顺序    |
+| `enabled`  | boolean                         | 是否启用                |
+| `account`  | ProviderAccountAdmin            | 扁平嵌入账号摘要        |
+| `health`   | ProviderAccountHealthAdmin \| null | 扁平嵌入健康度摘要   |
+
+### ProviderAccountHealthAdmin（管理端健康度）
+
+| 字段                 | 类型           | 说明                     |
+| -------------------- | -------------- | ------------------------ |
+| `modelId`            | number         | 模型 ID                  |
+| `accountId`          | number         | 账号 ID                  |
+| `successCount`       | number         | 窗口内成功次数           |
+| `failureCount`       | number         | 窗口内失败次数           |
+| `p95LatencyMs`       | number \| null | 窗口内 p95 延迟          |
+| `consecutiveFailures`| number         | 连续失败计数             |
+| `circuitOpenUntil`   | string \| null | 熔断截止时间             |
+| `lastSuccessAt`      | string \| null | 最近成功时间             |
+| `lastFailureAt`      | string \| null | 最近失败时间             |
+| `lastErrorCode`      | string \| null | 最近错误归类码           |
+| `updatedAt`          | string         | 更新时间                 |
 
 ### PresetOption
 
@@ -906,8 +1942,16 @@ POST /v1/prompts/:id/versions/:versionId/restore
 
 ### 权限
 
-| 角色   | 权限              | 说明                          |
-| ------ | ----------------- | ----------------------------- |
-| ADMIN  | `prompt.approve`  | 审核提示词                    |
-| AUTHOR | `prompt.write`    | 创建/编辑/删除自己的提示词    |
-| AUTHOR | `prompt.read`     | 查看公开和自己有权限的提示词  |
+| 角色   | 权限                       | 说明                                 |
+| ------ | -------------------------- | ------------------------------------ |
+| ADMIN  | `prompt.approve`           | 审核提示词                           |
+| ADMIN  | `prompt.category.manage`   | 管理提示词分类                       |
+| ADMIN  | `creative_tool.manage`     | 管理创意工具                         |
+| ADMIN  | `ai.model.manage`          | 管理 AI 模型槽位、模型定义、Provider 账号与健康度 |
+| ADMIN  | `ai.conversation.manage`   | 管理任意用户的 AI 会话               |
+| ADMIN  | `ai.generation.invoke`     | 触发文本生成                         |
+| ADMIN  | `ai.image.generate`        | 触发图片生成                         |
+| AUTHOR | `prompt.write`             | 创建/编辑/删除自己的提示词           |
+| AUTHOR | `ai.conversation.manage`   | 管理自己的 AI 会话                   |
+| AUTHOR | `ai.generation.invoke`     | 触发文本生成                         |
+| AUTHOR | `ai.image.generate`        | 触发图片生成                         |

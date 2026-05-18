@@ -16,7 +16,8 @@ export default $g.ctrl((app) =>
     )
     .get(
       ":id",
-      async ({ params }) => $g.success(await UserService.detail(Number(params.id))),
+      async ({ params }) =>
+        $g.success(await UserService.detail(Number(params.id))),
       {
         requireAuth: true,
         params: t.Object({

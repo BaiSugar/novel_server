@@ -1,6 +1,6 @@
 # 项目结构
 
-> 最后更新：2026-05-10  
+> 最后更新：2026-05-11  
 > **每次新增/删除/移动文件或文件夹后，必须同步更新本文档。**
 
 ```
@@ -19,11 +19,23 @@ novel/                              # 项目根
 │   │   │   │   └── auth.ctrl.ts     #     register / login / refresh / logout / me
 │   │   │   ├── user/                #   用户模块 → /v1/user/*
 │   │   │   │   └── user.ctrl.ts     #     list / :id（骨架）
-│   │   │   └── novel/               #   作品模块 → /v1/novel/*
-│   │   │       ├── novel.ctrl.ts    #     作品 CRUD + 归档 + 回收站
-│   │   │       └── chapter.ctrl.ts  #     章节 CRUD + 排序
-│   │   │   └── prompt/              #   提示词模块 → /v1/prompts/*
-│   │   │       └── prompt.ctrl.ts   #     提示词 CRUD + 审核 + 版本管理
+│   │   │   ├── novel/               #   作品模块 → /v1/novel/*
+│   │   │   │   ├── novel.ctrl.ts    #     作品 CRUD + 归档 + 回收站
+│   │   │   │   └── chapter.ctrl.ts  #     章节 CRUD + 排序
+│   │   │   ├── prompts/             #   提示词模块 → /v1/prompts/*
+│   │   │   │   └── prompt.ctrl.ts   #     提示词 CRUD + 分类 + 审核 + 版本管理
+│   │   │   ├── creativetools/       #   创意工具模块 → /v1/creative-tools/*
+│   │   │   │   └── creativeTool.ctrl.ts #  工具分类 + 工具 CRUD
+│   │   │   ├── ai/                  #   AI 用户侧模块 → /v1/ai/*
+│   │   │   │   ├── contextItem.ctrl.ts #  可选上下文素材列表
+│   │   │   │   ├── models.ctrl.ts   #     前端模型槽位列表/详情
+│   │   │   │   ├── conversation.ctrl.ts #  AI 会话与消息管理
+│   │   │   │   ├── generation.ctrl.ts #   文本生成 SSE / retry / cancel / detail
+│   │   │   │   └── images.ctrl.ts   #     图片生成与任务查询
+│   │   │   └── admin/               #   管理端模块 → /v1/admin/*
+│   │   │       ├── admin.ctrl.ts    #     父级占位
+│   │   │       └── ai/
+│   │   │           └── ai.ctrl.ts   #     AI 槽位/模型/账号/绑定/健康管理
 │   │   └── test/                    # 测试模块（开发期保留）
 │   │       ├── test.ctrl.ts
 │   │       └── test/
@@ -35,11 +47,42 @@ novel/                              # 项目根
 │   │   │   └── auth.service.ts      # register / login / refresh / logout / getMe
 │   │   ├── user/
 │   │   │   └── user.service.ts      # list / detail（骨架）
-│   │   └── novel/
-│   │       ├── novel.service.ts     # 作品 CRUD + 归档/回收站/恢复/字数统计
-│   │       └── chapter.service.ts   # 章节 CRUD + 排序
-│   │   └── prompt/
-│   │       └── prompt.service.ts    # 提示词 CRUD + 审核 + 版本快照 + 恢复
+│   │   ├── novel/
+│   │   │   ├── novel.service.ts     # 作品 CRUD + 归档/回收站/恢复/字数统计
+│   │   │   └── chapter.service.ts   # 章节 CRUD + 排序
+│   │   ├── prompt/
+│   │   │   └── prompt.service.ts    # 提示词 CRUD + 分类 + 审核 + 版本快照 + 恢复
+│   │   ├── category/
+│   │   │   └── category.service.ts  # 通用分类 CRUD + 提示词分类计数维护
+│   │   ├── creativeTool/
+│   │   │   └── creativeTool.service.ts # 创意工具 CRUD
+│   │   ├── aiModel/                 # AI 模型槽位与 Provider 调度域
+│   │   │   ├── types.ts
+│   │   │   ├── keyCodec.service.ts  # Provider API Key 加密/解密/脱敏
+│   │   │   ├── model.service.ts     # 槽位/模型/账号/绑定/健康 CRUD + 调用入口
+│   │   │   └── adapter/             # OpenAI / Anthropic / Image 协议适配
+│   │   │       ├── types.ts
+│   │   │       ├── index.ts
+│   │   │       ├── openai.adapter.ts
+│   │   │       └── anthropic.adapter.ts
+│   │   └── aiGeneration/            # AI 文本/图片生成域
+│   │       ├── types.ts
+│   │       ├── abort.ts             # 文本生成任务 AbortSignal 注册与取消
+│   │       ├── conversation.service.ts
+│   │       ├── message.service.ts
+│   │       ├── job.service.ts
+│   │       ├── orchestrator.service.ts # STANDARD / AGENT 编排
+│   │       ├── contextItem.service.ts # 上下文素材查询与生成上下文解析
+│   │       ├── contextResolver.service.ts
+│   │       ├── promptBuilder.service.ts
+│   │       ├── historyWindow.service.ts
+│   │       ├── image.service.ts
+│   │       ├── stream/
+│   │       │   ├── events.ts
+│   │       │   └── sseEmitter.ts
+│   │       └── tools/
+│   │           ├── types.ts
+│   │           └── registry.ts      # AGENT 只读内部工具注册中心
 │   │
 │   ├── lib/                        # 基础设施（扁平，不感知业务）
 │   │   ├── prisma.ts                # Prisma 客户端单例（MariaDB 适配器）
@@ -64,11 +107,13 @@ novel/                              # 项目根
 │   │   ├── wordCount.ts             # 章节字数字符统计（去空白）
 │   │   ├── file.ts                  # 文件流写入 + glob 路径树
 │   │   ├── watch.ts                 # 目录监听（路由热更新）
+│   │   ├── sse.ts                   # SSE 事件编码与 Response 封装
 │   │   └── menu-ui.ts               # CLI 菜单工具
 │   │
 │   ├── config/
 │   │   ├── database.ts              # 基于 .env 生成数据库连接串
-│   │   └── encryption.ts            # 章节正文加密密钥配置
+│   │   ├── encryption.ts            # 章节正文加密密钥配置
+│   │   └── ai.ts                    # AI Provider 密钥、健康窗口与图片默认参数配置
 │   │
 │   ├── bootstrap/
 │   │   ├── migrate.ts               # 自动应用 Prisma 迁移
@@ -83,6 +128,9 @@ novel/                              # 项目根
 │
 ├── docs/
 │   ├── api.md                       # API 对接文档
+│   ├── ai-model.md                  # AI 模型槽位/账号/故障转移设计（管理员 + 前端）
+│   ├── ai-generation.md             # AI 文本/图片生成系统设计
+│   ├── ai-system-progress.md        # AI 系统实施进度与交接备忘
 │   ├── security.md                  # JWT 即时撤销机制详细文档
 │   └── project-structure.md         # 本文件
 │
@@ -98,10 +146,15 @@ novel/                              # 项目根
 ├── .cursor/
 │   ├── rules/                        # Cursor 规则
 │   └── skills/                       # 代理技能
-│       └── code-review/              # 后端代码审查
+│       ├── code-review/              # 后端代码审查
+│       │   ├── SKILL.md
+│       │   ├── checklist.md
+│       │   └── examples.md
+│       └── system-design/            # 实施前系统设计与策划
 │           ├── SKILL.md
-│           ├── checklist.md
-│           └── examples.md
+│           ├── workflow.md
+│           ├── templates.md
+│           └── checklist.md
 │
 ├── .env                              # 环境变量
 ├── package.json                      # 依赖与脚本
@@ -137,10 +190,12 @@ controller/v2/ → 路由 /v2/*（未来）
 
 ## 业务域状态
 
-| 域      | 路由      | controller           | service              | 状态   |
-| ------- | --------- | -------------------- | -------------------- | ------ |
-| 认证    | /v1/auth  | v1/auth/auth.ctrl.ts | auth/auth.service.ts | 已完成 |
-| 用户    | /v1/user  | v1/user/user.ctrl.ts | user/user.service.ts | 骨架   |
-| 作品    | /v1/novel | v1/novel/            | novel/               | 已完成 |
-| 提示词  | /v1/prompts | v1/prompt/prompt.ctrl.ts | prompt/prompt.service.ts | 已完成 |
-| AI 生成 | —         | —                    | —                    | 待开发 |
+| 域       | 路由               | controller                             | service                              | 状态   |
+| -------- | ------------------ | -------------------------------------- | ------------------------------------ | ------ |
+| 认证     | /v1/auth           | v1/auth/auth.ctrl.ts                   | auth/auth.service.ts                 | 已完成 |
+| 用户     | /v1/user           | v1/user/user.ctrl.ts                   | user/user.service.ts                 | 骨架   |
+| 作品     | /v1/novel          | v1/novel/                              | novel/                               | 已完成 |
+| 提示词   | /v1/prompts        | v1/prompts/prompt.ctrl.ts              | prompt/prompt.service.ts             | 已完成 |
+| 创意工具 | /v1/creative-tools | v1/creative-tools/creativeTool.ctrl.ts | creativeTool/creativeTool.service.ts | 已完成 |
+| AI 模型  | /v1/ai/models, /v1/admin/ai | v1/ai/models.ctrl.ts, v1/admin/ai/ai.ctrl.ts | aiModel/ | 已落地，待验证 |
+| AI 生成  | /v1/ai/conversations, /v1/ai/generation, /v1/ai/images | v1/ai/ | aiGeneration/ | 已落地，待验证 |

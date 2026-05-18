@@ -24,13 +24,17 @@ export default $g.ctrl((app) =>
     .post(
       "books/:bookId/chapters",
       async ({ params, body }) =>
-        $g.success(await ChapterService.create(Number(params.bookId), body), "创建成功"),
+        $g.success(
+          await ChapterService.create(Number(params.bookId), body),
+          "创建成功",
+        ),
       {
         audit: { category: "novel", action: "create_chapter" },
         requireAuth: true,
         params: t.Object({ bookId: t.Numeric() }),
         body: t.Object({
           title: t.String({ minLength: 1, maxLength: 500 }),
+          summary: t.Optional(t.String()),
           content: t.Optional(t.String()),
         }),
       },
@@ -38,13 +42,17 @@ export default $g.ctrl((app) =>
     .put(
       "chapters/:id",
       async ({ params, body }) =>
-        $g.success(await ChapterService.update(Number(params.id), body), "更新成功"),
+        $g.success(
+          await ChapterService.update(Number(params.id), body),
+          "更新成功",
+        ),
       {
         audit: { category: "novel", action: "update_chapter" },
         requireAuth: true,
         params: t.Object({ id: t.Numeric() }),
         body: t.Object({
           title: t.Optional(t.String({ minLength: 1, maxLength: 500 })),
+          summary: t.Optional(t.String()),
           content: t.Optional(t.String()),
         }),
       },

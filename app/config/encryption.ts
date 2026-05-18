@@ -15,7 +15,9 @@ const BASE64_KEY_MIN_LENGTH = 43;
  * @param env 环境变量。
  * @returns 32 字节加密密钥。
  */
-export function getChapterEncryptionKey(env: EncryptionEnv = process.env): Uint8Array {
+export function getChapterEncryptionKey(
+  env: EncryptionEnv = process.env,
+): Uint8Array {
   const rawKey = env.CHAPTER_ENCRYPTION_KEY?.trim();
   if (!rawKey) {
     throw new Error("CHAPTER_ENCRYPTION_KEY is required");

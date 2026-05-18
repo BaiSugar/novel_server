@@ -17,7 +17,9 @@ export function encodeChapterContent(content: string): Uint8Array<ArrayBuffer> {
   const key = getChapterEncryptionKey();
   const iv = randomBytes(IV_BYTES);
   const compressed = gzipSync(Buffer.from(content, "utf8"));
-  const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_BYTES });
+  const cipher = createCipheriv(ALGORITHM, key, iv, {
+    authTagLength: AUTH_TAG_BYTES,
+  });
   const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
   const authTag = cipher.getAuthTag();
 
@@ -52,6 +54,9 @@ export function decodeChapterContent(stored: Uint8Array): string {
     authTagLength: AUTH_TAG_BYTES,
   });
   decipher.setAuthTag(authTag);
-  const compressed = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  const compressed = Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final(),
+  ]);
   return gunzipSync(compressed).toString("utf8");
 }

@@ -12,6 +12,8 @@ import { recountWords } from "./novel.service";
 export interface CreateChapterInput {
   /** 章节标题。 */
   title: string;
+  /** 章节概要。 */
+  summary?: string;
   /** 章节正文。 */
   content?: string;
 }
@@ -20,6 +22,8 @@ export interface CreateChapterInput {
 export interface UpdateChapterInput {
   /** 章节标题。 */
   title?: string;
+  /** 章节概要。 */
+  summary?: string;
   /** 章节正文。 */
   content?: string;
 }
@@ -38,6 +42,7 @@ const CHAPTER_SELECT = {
   id: true,
   bookId: true,
   title: true,
+  summary: true,
   content: true,
   order: true,
   wordCount: true,
@@ -50,6 +55,7 @@ const CHAPTER_LIST_SELECT = {
   id: true,
   bookId: true,
   title: true,
+  summary: true,
   order: true,
   wordCount: true,
   createdAt: true,
@@ -105,7 +111,11 @@ export async function create(
     data: {
       bookId,
       title: input.title,
-      content: input.content === undefined ? undefined : encodeChapterContent(input.content),
+      summary: input.summary,
+      content:
+        input.content === undefined
+          ? undefined
+          : encodeChapterContent(input.content),
       order: (maxOrder._max.order ?? -1) + 1,
       wordCount: input.content ? countWords(input.content) : 0,
     },
@@ -135,6 +145,7 @@ export async function update(
 
   const data: Record<string, unknown> = {};
   if (input.title !== undefined) data.title = input.title;
+  if (input.summary !== undefined) data.summary = input.summary;
   if (input.content !== undefined) {
     data.content = encodeChapterContent(input.content);
     data.wordCount = countWords(input.content);
@@ -178,7 +189,10 @@ export async function remove(chapterId: number): Promise<void> {
  * @param bookId 作品 ID。
  * @param chapterIds 新排序的章节 ID 列表（按顺序）。
  */
-export async function reorder(bookId: number, chapterIds: number[]): Promise<void> {
+export async function reorder(
+  bookId: number,
+  chapterIds: number[],
+): Promise<void> {
   const updates = chapterIds.map((id, index) =>
     prisma.novelChapter.update({
       where: { id, bookId },
