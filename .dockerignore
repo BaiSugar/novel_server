@@ -1,0 +1,16 @@
+node_modules
+dist
+logs
+.git
+.cursor
+.trae
+.agents
+docs
+.env
+.env.*
+*.md
+*.log
+*.trace
+*.zip
+*.tar.gz
+*.tgz

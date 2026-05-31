@@ -9,6 +9,7 @@ import {
 } from "@/app/generated/prisma/enums";
 import { HttpError } from "@/app/lib/httpError";
 import { prisma } from "@/app/lib/prisma";
+import * as FavoriteService from "@/app/service/prompt/promptFavorite.service";
 import { resolveProviderAdapter } from "./adapter";
 import type {
   ChatInvokeRequest,
@@ -279,8 +280,7 @@ async function assertModelExists(
     where: { id: modelId },
     select: { id: true, enabled: true },
   });
-  if (!model || !model.enabled)
-    throw new HttpError("模型定义不存在或未启用", 404);
+  if (!model?.enabled) throw new HttpError("模型定义不存在或未启用", 404);
 }
 
 function assertCapabilities(
@@ -327,7 +327,7 @@ async function buildModelCallContext(
   ModelCallContext & { modelDefinitionId: number; accountId: number }
 > {
   const slot = await findSlotWithModel(modelId);
-  if (!slot || !slot.enabled || !slot.boundModel || !slot.boundModel.enabled) {
+  if (!slot?.enabled || !slot.boundModel?.enabled) {
     throw new HttpError("模型当前不可用", 503, "MODEL_UNAVAILABLE");
   }
   assertCapabilities(slot.boundModel, requiredCapabilities);
@@ -507,6 +507,47 @@ export async function getSlotForCall(
   return buildModelCallContext(modelId, requiredCapabilities);
 }
 
+function redactChatMessagesForLog(
+  messages: ChatInvokeRequest["messages"],
+): Array<Record<string, unknown>> {
+  return messages.map((message) => ({
+    role: message.role,
+    content: `[REDACTED length=${message.content.length}]`,
+    ...(message.reasoningContent
+      ? {
+          reasoningContent: `[REDACTED length=${message.reasoningContent.length}]`,
+        }
+      : {}),
+    ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    ...(message.toolCalls?.length
+      ? {
+          toolCalls: message.toolCalls.map((toolCall) => ({
+            id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+          })),
+        }
+      : {}),
+  }));
+}
+
+function chatMessageMarkersForLog(
+  messages: ChatInvokeRequest["messages"],
+): Record<string, boolean> {
+  const text = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n");
+  return {
+    agent: text.includes("你正处于 AGENT 模式"),
+    contextLibrary: text.includes("素材库说明"),
+    chapterDiff: text.includes("章节 diff 规则"),
+    chapterContextSync: text.includes("章节素材同步规则"),
+    chapterAutoDiff: text.includes("章节改文提案"),
+    editorDiff: text.includes("编辑器多段改文提案"),
+  };
+}
+
 /** 调用文本聊天模型。 */
 export async function* invokeChat(
   modelId: number,
@@ -528,7 +569,17 @@ export async function* invokeChat(
     if (process.env.DEV_LOG !== "false") {
       console.log(
         `[invokeChat] modelId=${ctx.modelDefinitionId} model=${ctx.model.identifier}`,
-        JSON.stringify(requestWithDefaults.messages, null, 2),
+        JSON.stringify(
+          {
+            messages: redactChatMessagesForLog(requestWithDefaults.messages),
+            systemMarkers: chatMessageMarkersForLog(
+              requestWithDefaults.messages,
+            ),
+            tools: requestWithDefaults.tools?.map((tool) => tool.name) ?? [],
+          },
+          null,
+          2,
+        ),
       );
     }
     for await (const event of adapter.invokeChat(
@@ -1175,10 +1226,7 @@ export async function getUserPromptState(
       },
     });
     for (const p of prompts) {
-      if (
-        !p.isDeleted &&
-        (p.privacy === "SHARED" || p.userId === userId)
-      ) {
+      if (!p.isDeleted && (p.privacy === "SHARED" || p.userId === userId)) {
         promptMap.set(p.id, {
           id: p.id,
           name: p.name,
@@ -1192,7 +1240,7 @@ export async function getUserPromptState(
   return rows.map((row) => ({
     categoryId: row.categoryId,
     promptTemplate: row.promptTemplateId
-      ? promptMap.get(row.promptTemplateId) ?? null
+      ? (promptMap.get(row.promptTemplateId) ?? null)
       : null,
   }));
 }
@@ -1245,6 +1293,10 @@ export async function saveUserPromptState(
         categoryName: prompt.category?.name ?? null,
       };
     }
+  }
+
+  if (row.promptTemplateId) {
+    await FavoriteService.add(userId, row.promptTemplateId).catch(() => {});
   }
 
   return {

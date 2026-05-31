@@ -2,6 +2,7 @@ import type {
   ChatStreamEvent,
   TokenUsage,
 } from "@/app/service/aiModel/adapter/types";
+import type { EditorDiffProposal } from "../types";
 
 export type SseEvent =
   | {
@@ -11,6 +12,14 @@ export type SseEvent =
   | {
       event: "message.delta";
       data: { jobId: number; messageId: number; delta: string };
+    }
+  | {
+      event: "message.reasoning_delta";
+      data: { jobId: number; messageId: number; delta: string };
+    }
+  | {
+      event: "edit.proposal";
+      data: EditorDiffProposal & { jobId: number; messageId: number };
     }
   | {
       event: "tool.call";
@@ -36,6 +45,7 @@ export type SseEvent =
         jobId: number;
         messageId: number;
         content: string;
+        reasoningContent?: string;
         usage?: TokenUsage;
         toolCalls?: Array<{ id: string; name: string; arguments: unknown }>;
       };

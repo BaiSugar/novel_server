@@ -9,6 +9,7 @@ export type Permission =
   | "prompt.read"
   | "prompt.category.manage"
   | "creative_tool.manage"
+  | "context_library.manage"
   | "ai.model.manage"
   | "ai.conversation.manage"
   | "ai.generation.invoke"
@@ -23,6 +24,7 @@ export const PERM = {
   PROMPT_READ: "prompt.read", // 提示词查看
   PROMPT_CATEGORY_MANAGE: "prompt.category.manage", // 提示词分类管理
   CREATIVE_TOOL_MANAGE: "creative_tool.manage", // 创作工具管理
+  CONTEXT_LIBRARY_MANAGE: "context_library.manage", // 上下文素材库管理
   AI_MODEL_MANAGE: "ai.model.manage", // AI模型管理
   AI_CONVERSATION_MANAGE: "ai.conversation.manage", // AI对话管理
   AI_GENERATION_INVOKE: "ai.generation.invoke", // AI生成调用
@@ -39,6 +41,7 @@ const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
     "prompt.read",
     "prompt.category.manage",
     "creative_tool.manage",
+    "context_library.manage",
     "ai.model.manage",
     "ai.conversation.manage",
     "ai.generation.invoke",
@@ -48,6 +51,7 @@ const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
     "novel.write",
     "prompt.write",
     "prompt.read",
+    "context_library.manage",
     "ai.conversation.manage",
     "ai.generation.invoke",
     "ai.image.generate",

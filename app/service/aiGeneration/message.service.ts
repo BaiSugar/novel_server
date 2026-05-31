@@ -4,7 +4,23 @@ import { AiMessageRole, AiMessageStatus } from "@/app/generated/prisma/enums";
 import { HttpError } from "@/app/lib/httpError";
 import { prisma } from "@/app/lib/prisma";
 import { ensureOwned } from "./conversation.service";
-import type { AiMessageItem, CursorQuery } from "./types";
+import type {
+  AiGenerationInputSnapshot,
+  AiMessageItem,
+  CursorQuery,
+  EditorDiffProposal,
+} from "./types";
+
+const PUBLIC_USER_CONTENT_MARKER = { publicContent: true };
+
+function isPublicUserContentMarker(value: unknown): boolean {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).publicContent === true
+  );
+}
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
@@ -12,6 +28,74 @@ function sha256(content: string): string {
 
 function toIso(value: Date): string {
   return value.toISOString();
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function extractGenerationInputSnapshot(
+  value: unknown,
+): AiGenerationInputSnapshot | undefined {
+  const context = asRecord(value);
+  const input = asRecord(context?.clientInput);
+  if (!input) return undefined;
+  const mode = input.mode;
+  const modelId = Number(input.modelId);
+  if (typeof mode !== "string" || !Number.isInteger(modelId) || modelId <= 0) {
+    return undefined;
+  }
+  return {
+    ...input,
+    mode: mode as AiGenerationInputSnapshot["mode"],
+    modelId,
+  } as AiGenerationInputSnapshot;
+}
+
+async function loadGenerationInputSnapshots(
+  conversationId: number,
+  messages: Array<{ id: number; role: string }>,
+): Promise<Map<number, AiGenerationInputSnapshot>> {
+  const anchorMessageIds = messages
+    .filter((message) => message.role === AiMessageRole.USER)
+    .map((message) => message.id);
+  if (!anchorMessageIds.length) return new Map();
+  const jobs = await prisma.aiGenerationJob.findMany({
+    where: { conversationId, anchorMessageId: { in: anchorMessageIds } },
+    select: { anchorMessageId: true, contextItemIds: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  const result = new Map<number, AiGenerationInputSnapshot>();
+  for (const job of jobs) {
+    if (!job.anchorMessageId || result.has(job.anchorMessageId)) continue;
+    const snapshot = extractGenerationInputSnapshot(job.contextItemIds);
+    if (snapshot) result.set(job.anchorMessageId, snapshot);
+  }
+  return result;
+}
+
+function extractReasoningContent(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const reasoningContent = (value as Record<string, unknown>).reasoningContent;
+  return typeof reasoningContent === "string" && reasoningContent
+    ? reasoningContent
+    : undefined;
+}
+
+function extractEditProposal(value: unknown): EditorDiffProposal | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const editProposal = (value as Record<string, unknown>).editProposal;
+  return editProposal &&
+    typeof editProposal === "object" &&
+    !Array.isArray(editProposal)
+    ? (editProposal as EditorDiffProposal)
+    : undefined;
 }
 
 function mapMessage(
@@ -32,11 +116,35 @@ function mapMessage(
     createdAt: Date;
     updatedAt: Date;
   },
-  options: { redactSensitiveContent?: boolean } = {},
+  options: {
+    redactSensitiveContent?: boolean;
+    redactInternalToolCalls?: boolean;
+    generationInput?: AiGenerationInputSnapshot;
+  } = {},
 ): AiMessageItem {
   const shouldRedactContent =
     options.redactSensitiveContent &&
-    (row.role === AiMessageRole.USER || row.role === AiMessageRole.TOOL);
+    (row.role === AiMessageRole.TOOL ||
+      (row.role === AiMessageRole.USER &&
+        !isPublicUserContentMarker(row.toolCalls)));
+  const toolCalls =
+    row.role === AiMessageRole.USER && isPublicUserContentMarker(row.toolCalls)
+      ? null
+      : options.redactInternalToolCalls &&
+          row.toolCalls &&
+          typeof row.toolCalls === "object" &&
+          !Array.isArray(row.toolCalls)
+        ? ((row.toolCalls as Record<string, unknown>).toolCalls ?? null)
+        : row.toolCalls;
+
+  const reasoningContent =
+    row.role === AiMessageRole.ASSISTANT && !shouldRedactContent
+      ? extractReasoningContent(row.toolCalls)
+      : undefined;
+  const editProposal =
+    row.role === AiMessageRole.ASSISTANT && !shouldRedactContent
+      ? extractEditProposal(row.toolCalls)
+      : undefined;
 
   return {
     id: row.id,
@@ -45,8 +153,13 @@ function mapMessage(
     role: row.role,
     status: row.status,
     content: shouldRedactContent ? "" : row.content,
+    ...(reasoningContent ? { reasoningContent } : {}),
+    ...(editProposal ? { editProposal } : {}),
     ...(shouldRedactContent ? { contentRedacted: true } : {}),
-    toolCalls: row.toolCalls,
+    ...(row.role === AiMessageRole.USER && options.generationInput
+      ? { generationInput: options.generationInput }
+      : {}),
+    toolCalls,
     toolCallId: row.toolCallId,
     toolName: row.toolName,
     tokenUsage: row.tokenUsage,
@@ -99,9 +212,17 @@ export async function list(
     orderBy: [{ seq: "asc" }, { id: "asc" }],
   });
   const items = rows.slice(0, limit);
+  const generationInputByMessageId = await loadGenerationInputSnapshots(
+    conversationId,
+    items,
+  );
   return {
     items: items.map((item) =>
-      mapMessage(item, { redactSensitiveContent: true }),
+      mapMessage(item, {
+        redactSensitiveContent: true,
+        redactInternalToolCalls: true,
+        generationInput: generationInputByMessageId.get(item.id),
+      }),
     ),
     nextCursor: rows.length > limit ? rows[limit]!.id : null,
   };
@@ -112,6 +233,7 @@ export async function appendUserMessage(
   conversationId: number,
   parentMessageId: number | null,
   content: string,
+  options: { publicContent?: boolean } = {},
 ): Promise<AiMessageItem> {
   const row = await prisma.aiMessage.create({
     data: {
@@ -121,6 +243,9 @@ export async function appendUserMessage(
       status: AiMessageStatus.ACTIVE,
       content,
       contentHash: sha256(content),
+      toolCalls: options.publicContent
+        ? (PUBLIC_USER_CONTENT_MARKER as Prisma.InputJsonValue)
+        : undefined,
       seq: await nextSeq(conversationId),
     },
   });

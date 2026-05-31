@@ -65,7 +65,18 @@ function toOpenAiToolCalls(
   }));
 }
 
-function toOpenAiMessages(messages: ChatInvokeRequest["messages"]): unknown[] {
+function supportsReasoningContentPassback(
+  ctx: ProviderRuntimeContext,
+): boolean {
+  return [ctx.platform, ctx.baseUrl, ctx.modelIdentifier].some((value) =>
+    value.trim().toLowerCase().includes("deepseek"),
+  );
+}
+
+function toOpenAiMessages(
+  messages: ChatInvokeRequest["messages"],
+  options: { includeReasoningContent?: boolean } = {},
+): unknown[] {
   return messages.map((message) => {
     if (message.role === "tool") {
       return {
@@ -79,6 +90,11 @@ function toOpenAiMessages(messages: ChatInvokeRequest["messages"]): unknown[] {
       content: message.toolCalls?.length
         ? message.content || null
         : message.content,
+      ...(options.includeReasoningContent &&
+      message.role === "assistant" &&
+      message.reasoningContent
+        ? { reasoning_content: message.reasoningContent }
+        : {}),
       ...(message.toolCalls
         ? { tool_calls: toOpenAiToolCalls(message.toolCalls) }
         : {}),
@@ -140,6 +156,7 @@ async function* streamOpenAiChat(
   const decoder = new TextDecoder();
   let buffer = "";
   let completedText = "";
+  let reasoningContent = "";
   let usage: TokenUsage | null = null;
   const toolCallsByIndex = new Map<
     number,
@@ -169,6 +186,14 @@ async function* streamOpenAiChat(
       if (content) {
         completedText += content;
         yield { type: "delta", text: content };
+      }
+      const reasoningChunk =
+        typeof delta?.reasoning_content === "string"
+          ? delta.reasoning_content
+          : "";
+      if (reasoningChunk) {
+        reasoningContent += reasoningChunk;
+        yield { type: "reasoning_delta", text: reasoningChunk };
       }
 
       const toolDeltas = delta?.tool_calls as
@@ -223,6 +248,7 @@ async function* streamOpenAiChat(
   yield {
     type: "completed",
     text: completedText,
+    ...(reasoningContent ? { reasoningContent } : {}),
     ...(usage ? { usage } : {}),
     ...(toolCalls.length ? { toolCalls } : {}),
   };
@@ -241,7 +267,9 @@ export const openAiAdapter: ProviderAdapter = {
     const body = {
       ...mergeParams(ctx.modelExtraParams, ctx.extraParams),
       model: ctx.modelIdentifier,
-      messages: toOpenAiMessages(request.messages),
+      messages: toOpenAiMessages(request.messages, {
+        includeReasoningContent: supportsReasoningContentPassback(ctx),
+      }),
       stream: true,
       temperature: request.temperature,
       max_tokens: request.maxOutputTokens,

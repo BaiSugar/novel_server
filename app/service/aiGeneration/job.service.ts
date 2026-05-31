@@ -5,27 +5,33 @@ import {
 } from "@/app/generated/prisma/enums";
 import { HttpError } from "@/app/lib/httpError";
 import { prisma } from "@/app/lib/prisma";
+import { getUserModelState } from "@/app/service/aiModel/model.service";
 import {
   abortGenerationJob,
   clearGenerationJobAbort,
   registerGenerationJobAbort,
 } from "./abort";
-import { resolveGenerationContext } from "./contextResolver.service";
+import {
+  isEditorWritingActionScene,
+  resolveGenerationContext,
+} from "./contextResolver.service";
 import {
   create as createConversation,
   ensureOwned,
 } from "./conversation.service";
+import { normalizeEditorDiffInput } from "./editorDiff.service";
 import * as MessageService from "./message.service";
 import { execute } from "./orchestrator.service";
 import type { SseEvent } from "./stream/events";
-import { getUserModelState } from "@/app/service/aiModel/model.service";
 import type {
+  AiGenerationInputSnapshot,
   AiGenerationJobItem,
+  AiMetadata,
   CreateGenerationInput,
   RetryGenerationInput,
 } from "./types";
 
-const DEFAULT_MAX_ITERATIONS = 8;
+const DEFAULT_MAX_ITERATIONS = 64;
 
 function toIso(value: Date | null): string | null {
   return value ? value.toISOString() : null;
@@ -96,13 +102,21 @@ async function* withGenerationAbortCleanup(
   }
 }
 
+function activeMetadata(
+  metadata: CreateGenerationInput["metadata"],
+): AiMetadata | undefined {
+  return metadata ?? undefined;
+}
+
 function resolveExecutionMetadata(
   input: CreateGenerationInput,
   conversationMetadata: unknown,
-): CreateGenerationInput["metadata"] {
-  return (
+): AiMetadata | undefined {
+  return activeMetadata(
     input.metadata ??
-    (conversationMetadata as CreateGenerationInput["metadata"])
+      stripEditorWritingActionScene(
+        conversationMetadata as CreateGenerationInput["metadata"],
+      ),
   );
 }
 
@@ -117,28 +131,293 @@ function normalizeContextItemIds(
   return [...new Set(normalized)];
 }
 
-function toContextItemIdsJson(
-  ids: number[] | undefined,
-): Prisma.InputJsonValue | undefined {
-  return ids?.length ? ids : undefined;
+interface StoredGenerationJobModelInput {
+  systemPromptText: string;
+  renderedPrompt: string;
+  contextText: string;
+  finalUserPrompt: string;
+  promptHash: string;
+}
+
+interface StoredGenerationJobEditorDiff {
+  mode: "novel_multi_diff" | "chapter_auto_diff";
+  documentId?: string;
+  docVersion?: string;
+  baseHash?: string;
+  baseLength?: number;
+  caretOffset?: number;
+  cursorOffset?: number;
+  selection?: { start: number; end: number };
+}
+
+interface StoredGenerationJobContext {
+  clientInput?: AiGenerationInputSnapshot;
+  contextItemIds?: number[];
+  modelInput?: StoredGenerationJobModelInput;
+  editorDiff?: StoredGenerationJobEditorDiff;
+}
+
+function toStoredGenerationJobEditorDiff(
+  editorDiff: CreateGenerationInput["editorDiff"],
+): StoredGenerationJobEditorDiff | undefined {
+  if (!editorDiff) return undefined;
+  if (editorDiff.mode === "chapter_auto_diff") {
+    return { mode: editorDiff.mode };
+  }
+  return {
+    mode: editorDiff.mode,
+    ...(editorDiff.documentId ? { documentId: editorDiff.documentId } : {}),
+    ...(editorDiff.docVersion ? { docVersion: editorDiff.docVersion } : {}),
+    baseHash: editorDiff.baseHash,
+    baseLength: editorDiff.baseText.length,
+    caretOffset: editorDiff.caretOffset ?? editorDiff.cursorOffset ?? 0,
+    ...(editorDiff.cursorOffset !== undefined
+      ? { cursorOffset: editorDiff.cursorOffset }
+      : {}),
+    ...(editorDiff.selection ? { selection: editorDiff.selection } : {}),
+  };
+}
+
+function toStoredGenerationJobContext(input: {
+  clientInput?: AiGenerationInputSnapshot;
+  contextItemIds?: number[];
+  modelInput?: StoredGenerationJobModelInput;
+  editorDiff?: StoredGenerationJobEditorDiff;
+}): Prisma.InputJsonValue | undefined {
+  const value: StoredGenerationJobContext = {
+    ...(input.clientInput ? { clientInput: input.clientInput } : {}),
+    ...(input.contextItemIds?.length
+      ? { contextItemIds: input.contextItemIds }
+      : {}),
+    ...(input.modelInput ? { modelInput: input.modelInput } : {}),
+    ...(input.editorDiff ? { editorDiff: input.editorDiff } : {}),
+  };
+  return Object.keys(value).length
+    ? (value as unknown as Prisma.InputJsonValue)
+    : undefined;
 }
 
 function fromContextItemIdsJson(value: unknown): number[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const ids = value
+  const rawIds = Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? (value as StoredGenerationJobContext).contextItemIds
+      : undefined;
+  if (!Array.isArray(rawIds)) return undefined;
+  const ids = rawIds
     .map((id) => Number(id))
     .filter((id) => Number.isInteger(id) && id > 0);
   return ids.length ? [...new Set(ids)] : undefined;
+}
+
+function modelInputFromJobContext(
+  value: unknown,
+): StoredGenerationJobModelInput | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const modelInput = (value as StoredGenerationJobContext).modelInput;
+  if (!modelInput || typeof modelInput !== "object") return undefined;
+  const requiredFields: Array<keyof StoredGenerationJobModelInput> = [
+    "systemPromptText",
+    "renderedPrompt",
+    "contextText",
+    "finalUserPrompt",
+    "promptHash",
+  ];
+  if (requiredFields.some((field) => typeof modelInput[field] !== "string")) {
+    return undefined;
+  }
+  return modelInput;
+}
+
+function stripEditorWritingActionScene(
+  metadata: CreateGenerationInput["metadata"],
+): CreateGenerationInput["metadata"] {
+  if (!metadata) return undefined;
+  const scene =
+    metadata.scene && !isEditorWritingActionScene(metadata.scene)
+      ? metadata.scene
+      : undefined;
+  const stripped: NonNullable<CreateGenerationInput["metadata"]> = {
+    ...(metadata.novelId !== undefined ? { novelId: metadata.novelId } : {}),
+    ...(metadata.chapterId !== undefined
+      ? { chapterId: metadata.chapterId }
+      : {}),
+    ...(metadata.promptTemplateId !== undefined
+      ? { promptTemplateId: metadata.promptTemplateId }
+      : {}),
+    ...(scene !== undefined ? { scene } : {}),
+  };
+  return Object.keys(stripped).length ? stripped : undefined;
 }
 
 function stripPromptTemplateId(
   metadata: CreateGenerationInput["metadata"],
 ): CreateGenerationInput["metadata"] {
   if (!metadata) return undefined;
+  const scene =
+    metadata.scene && !isEditorWritingActionScene(metadata.scene)
+      ? metadata.scene
+      : undefined;
   return {
-    novelId: metadata.novelId,
-    chapterId: metadata.chapterId,
-    scene: metadata.scene,
+    ...(metadata.novelId !== undefined ? { novelId: metadata.novelId } : {}),
+    ...(metadata.chapterId !== undefined
+      ? { chapterId: metadata.chapterId }
+      : {}),
+    ...(scene !== undefined ? { scene } : {}),
+  };
+}
+
+function modelInputFromResolvedContext(resolvedContext: {
+  systemPromptText: string;
+  renderedPrompt: string;
+  contextText: string;
+  finalUserPrompt: string;
+  promptHash: string;
+}): StoredGenerationJobModelInput {
+  return {
+    systemPromptText: resolvedContext.systemPromptText,
+    renderedPrompt: resolvedContext.renderedPrompt,
+    contextText: resolvedContext.contextText,
+    finalUserPrompt: resolvedContext.finalUserPrompt,
+    promptHash: resolvedContext.promptHash,
+  };
+}
+
+function generationInputSnapshot(input: {
+  conversationId: number;
+  source: CreateGenerationInput;
+  mode: CreateGenerationInput["mode"];
+  modelId: number;
+  promptTemplateIds?: number[];
+  contextItemIds?: number[];
+  metadata?: AiMetadata;
+  editorDiff?: StoredGenerationJobEditorDiff;
+  temperature?: number;
+}): AiGenerationInputSnapshot {
+  return {
+    conversationId: input.conversationId,
+    mode: input.mode,
+    modelId: input.modelId,
+    ...(input.source.userMessage !== undefined
+      ? { userMessage: input.source.userMessage }
+      : {}),
+    ...(input.promptTemplateIds?.length
+      ? { promptTemplateIds: input.promptTemplateIds }
+      : {}),
+    ...(input.source.promptInputs !== undefined
+      ? { promptInputs: input.source.promptInputs }
+      : {}),
+    ...(input.contextItemIds?.length
+      ? { contextItemIds: input.contextItemIds }
+      : {}),
+    ...(input.source.chapterIds?.length
+      ? { chapterIds: input.source.chapterIds }
+      : {}),
+    ...(input.source.chapterSummaryIds?.length
+      ? { chapterSummaryIds: input.source.chapterSummaryIds }
+      : {}),
+    ...(input.source.categoryContexts?.length
+      ? { categoryContexts: input.source.categoryContexts }
+      : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+    ...(input.editorDiff ? { editorDiff: input.editorDiff } : {}),
+    ...(input.temperature !== undefined
+      ? { temperature: input.temperature }
+      : {}),
+  };
+}
+
+function assertEditorWritingActionDoesNotUseDiff(
+  input: CreateGenerationInput,
+): void {
+  const scene = input.metadata?.scene;
+  if (!scene || !isEditorWritingActionScene(scene) || !input.editorDiff) return;
+  throw new HttpError(
+    "编辑器快捷写作场景不支持 editorDiff",
+    422,
+    "EDITOR_WRITING_ACTION_DIFF_UNSUPPORTED",
+  );
+}
+
+function resolveDisplayUserMessage(input: CreateGenerationInput): string {
+  const message = input.userMessage?.trim();
+  if (message) return message;
+  const scene = input.metadata?.scene;
+  if (scene && isEditorWritingActionScene(scene)) return `[${scene}]`;
+  if (input.promptTemplateIds?.length || input.metadata?.promptTemplateId) {
+    return "[提示词生成]";
+  }
+  if (input.categoryContexts?.some((item) => item.content?.trim())) {
+    return "[上下文生成]";
+  }
+  return "[生成请求]";
+}
+
+function resolvedContextFromStoredModelInput(
+  modelInput: StoredGenerationJobModelInput,
+): Awaited<ReturnType<typeof resolveGenerationContext>> {
+  return {
+    systemPromptText: modelInput.systemPromptText,
+    renderedPrompt: modelInput.renderedPrompt,
+    contextText: modelInput.contextText,
+    finalUserPrompt: modelInput.finalUserPrompt,
+    promptHash: modelInput.promptHash,
+  };
+}
+
+function chapterIdFromDocumentId(
+  documentId: string | undefined,
+): number | undefined {
+  const matched = documentId?.match(/^chapter-(\d+)$/);
+  if (!matched) return undefined;
+  const chapterId = Number(matched[1]);
+  return Number.isInteger(chapterId) && chapterId > 0 ? chapterId : undefined;
+}
+
+async function enrichEditorDiffTarget(
+  userId: number,
+  editorDiff: CreateGenerationInput["editorDiff"],
+  metadata: AiMetadata | undefined,
+): Promise<CreateGenerationInput["editorDiff"]> {
+  if (
+    !editorDiff ||
+    editorDiff.mode !== "novel_multi_diff" ||
+    !metadata?.novelId ||
+    !("baseText" in editorDiff)
+  ) {
+    return editorDiff;
+  }
+  const documentChapterId = chapterIdFromDocumentId(editorDiff.documentId);
+  if (
+    metadata.chapterId &&
+    documentChapterId &&
+    metadata.chapterId !== documentChapterId
+  ) {
+    throw new HttpError(
+      "editorDiff.documentId 与当前章节不匹配",
+      422,
+      "EDITOR_DIFF_TARGET_MISMATCH",
+    );
+  }
+  const chapterId = metadata.chapterId ?? documentChapterId;
+  if (!chapterId) return editorDiff;
+  const chapter = await prisma.novelChapter.findFirst({
+    where: {
+      id: chapterId,
+      book: { id: metadata.novelId, userId, isTrash: false },
+    },
+    select: { title: true },
+  });
+  if (!chapter) throw new HttpError("章节不存在", 404);
+  return {
+    ...editorDiff,
+    documentId: editorDiff.documentId ?? `chapter-${chapterId}`,
+    target: {
+      novelId: metadata.novelId,
+      chapterId,
+      chapterTitle: chapter.title,
+    },
   };
 }
 
@@ -148,44 +427,59 @@ export async function createAndStart(
   input: CreateGenerationInput,
   signal?: AbortSignal,
 ): Promise<{ job: AiGenerationJobItem; stream: AsyncIterable<SseEvent> }> {
+  assertEditorWritingActionDoesNotUseDiff(input);
   const conversation = input.conversationId
     ? await ensureOwned(userId, input.conversationId)
     : await createConversation(userId, {
         mode: input.mode,
         modelId: input.modelId,
-        metadata: input.metadata ?? null,
+        metadata: stripEditorWritingActionScene(input.metadata) ?? null,
       });
   const conversationId = conversation.id;
   const mode = input.mode;
   const modelId = input.modelId;
   const metadata = resolveExecutionMetadata(input, conversation.metadata);
+  const editorDiff = await enrichEditorDiffTarget(
+    userId,
+    normalizeEditorDiffInput(input.editorDiff),
+    metadata,
+  );
   const contextItemIds = normalizeContextItemIds(input.contextItemIds);
-  const promptTemplateIds = input.promptTemplateIds ?? (metadata?.promptTemplateId ? [metadata.promptTemplateId] : undefined);
+  const promptTemplateIds =
+    input.promptTemplateIds ??
+    (metadata?.promptTemplateId ? [metadata.promptTemplateId] : undefined);
   const resolvedContext = await resolveGenerationContext(userId, {
     userMessage: input.userMessage,
     promptTemplateIds,
     promptInputs: input.promptInputs,
+    categoryContexts: input.categoryContexts,
     metadata,
     contextItemIds,
+    chapterIds: input.chapterIds,
+    chapterSummaryIds: input.chapterSummaryIds,
   });
+  const effectiveTemperature =
+    input.temperature ??
+    (await getUserModelState(userId).then((s) => s?.temperature ?? undefined));
+  const editorDiffSnapshot = toStoredGenerationJobEditorDiff(editorDiff);
   const executionInput: CreateGenerationInput = {
     ...input,
     conversationId,
-    userMessage: resolvedContext.renderedPrompt,
+    userMessage: resolvedContext.finalUserPrompt,
     mode,
     modelId,
     metadata,
+    editorDiff,
     contextItemIds,
-    // 未传 temperature 时，读取用户保存的模型状态
-    temperature:
-      input.temperature ??
-      (await getUserModelState(userId).then((s) => s?.temperature ?? undefined)),
+    categoryContexts: input.categoryContexts,
+    temperature: effectiveTemperature,
   };
   const parentMessageId = await lastActiveMessageId(conversationId);
   const userMessage = await MessageService.appendUserMessage(
     conversationId,
     parentMessageId,
-    resolvedContext.renderedPrompt,
+    resolveDisplayUserMessage(input),
+    { publicContent: true },
   );
   const jobRow = await prisma.aiGenerationJob.create({
     data: {
@@ -195,7 +489,22 @@ export async function createAndStart(
       modelId,
       anchorMessageId: userMessage.id,
       maxIterations: DEFAULT_MAX_ITERATIONS,
-      contextItemIds: toContextItemIdsJson(contextItemIds),
+      contextItemIds: toStoredGenerationJobContext({
+        clientInput: generationInputSnapshot({
+          conversationId,
+          source: input,
+          mode,
+          modelId,
+          promptTemplateIds,
+          contextItemIds,
+          metadata,
+          editorDiff: editorDiffSnapshot,
+          temperature: effectiveTemperature,
+        }),
+        contextItemIds,
+        modelInput: modelInputFromResolvedContext(resolvedContext),
+        editorDiff: editorDiffSnapshot,
+      }),
     },
   });
   const assistant = await MessageService.appendPendingAssistant(
@@ -239,27 +548,44 @@ export async function retry(
   });
   if (!target) throw new HttpError("重试目标消息不存在", 404);
   const conversation = await ensureOwned(userId, target.conversationId);
+  const jobContext = target.job?.contextItemIds;
+  if (
+    jobContext &&
+    typeof jobContext === "object" &&
+    !Array.isArray(jobContext) &&
+    (jobContext as StoredGenerationJobContext).editorDiff
+  ) {
+    throw new HttpError(
+      "编辑提案任务需要前端文档快照，暂不支持后端重试，请重新发起生成",
+      409,
+      "EDITOR_DIFF_RETRY_UNSUPPORTED",
+    );
+  }
 
   const { parentMessageId } = await MessageService.supersedeSubtree(
     userId,
     target.conversationId,
     target.id,
   );
-  const userMessage = target.parent?.content ?? "请重新生成上一条回复";
   const mode = target.job?.mode ?? conversation.mode;
   const modelId = target.modelId ?? conversation.modelId;
-  const metadata = stripPromptTemplateId(
-    conversation.metadata as CreateGenerationInput["metadata"],
+  const metadata = activeMetadata(
+    stripPromptTemplateId(
+      conversation.metadata as CreateGenerationInput["metadata"],
+    ),
   );
   const contextItemIds = fromContextItemIdsJson(target.job?.contextItemIds);
-  const resolvedContext = await resolveGenerationContext(userId, {
-    userMessage,
-    metadata,
-    contextItemIds,
-  });
+  const storedModelInput = modelInputFromJobContext(target.job?.contextItemIds);
+  const resolvedContext = storedModelInput
+    ? resolvedContextFromStoredModelInput(storedModelInput)
+    : await resolveGenerationContext(userId, {
+        userMessage: target.parent?.content ?? "请重新生成上一条回复",
+        metadata,
+        contextItemIds,
+      });
   const executionInput: CreateGenerationInput = {
     conversationId: target.conversationId,
-    userMessage: resolvedContext.renderedPrompt,
+    userMessage: resolvedContext.finalUserPrompt,
     mode,
     modelId,
     metadata,
@@ -273,8 +599,14 @@ export async function retry(
       modelId,
       anchorMessageId: parentMessageId,
       retryTargetId: target.id,
-      maxIterations: target.job?.maxIterations ?? DEFAULT_MAX_ITERATIONS,
-      contextItemIds: toContextItemIdsJson(contextItemIds),
+      maxIterations: Math.max(
+        target.job?.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        DEFAULT_MAX_ITERATIONS,
+      ),
+      contextItemIds: toStoredGenerationJobContext({
+        contextItemIds,
+        modelInput: modelInputFromResolvedContext(resolvedContext),
+      }),
     },
   });
   const assistant = await MessageService.appendPendingAssistant(

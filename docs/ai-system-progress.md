@@ -1,8 +1,8 @@
 # AI 生成系统交接记忆文档
 
 > 用途：开启新对话后，把本文档作为首要上下文读取即可续接。
-> 最后更新：2026-05-13
-> 当前状态：AI 模型域、文本生成、图片生成、SSE、提示词后端渲染和敏感响应边界已落地；作品上下文选择规则需要按用户最新要求继续修正。
+> 最后更新：2026-05-24
+> 当前状态：AI 模型域、文本生成、图片生成、SSE、提示词后端渲染和敏感响应边界已落地；角色库、词条库已通过统一上下文素材库接入 AI 上下文。
 
 ---
 
@@ -47,8 +47,8 @@
 相关文件：
 
 - `app/service/aiGeneration/types.ts`
-- `app/service/aiGeneration/contextResolver.service.ts`
-- `app/service/aiGeneration/promptBuilder.service.ts`
+- `app/service/aiGeneration/contextResolver.service.ts`：渲染提示词模板为 system prompt，并解析用户明确选择/输入的上下文。
+- `app/service/aiGeneration/promptBuilder.service.ts`：按 `system -> history/tools -> final user` 组装模型消息。
 - `app/service/aiGeneration/historyWindow.service.ts`
 - `app/service/aiGeneration/conversation.service.ts`
 - `app/service/aiGeneration/message.service.ts`
@@ -58,6 +58,7 @@
 - `app/service/aiGeneration/stream/sseEmitter.ts`
 - `app/controller/v1/ai/conversation.ctrl.ts`
 - `app/controller/v1/ai/generation.ctrl.ts`
+- `app/controller/v1/ai/contextItem.ctrl.ts`：提供作品素材库可选素材列表和生成设置页素材选择状态保存/读取。
 
 当前行为：
 
@@ -70,12 +71,18 @@
 - 后端负责：
   - 读取提示词模板。
   - 用 `promptInputs` 替换 `{{变量}}`。
+  - 将提示词模板渲染结果归入 system prompt。
+  - 将 `contextItemIds`、`categoryContexts`、`metadata.scene` 和 `userMessage` 归入最终 user 消息。
   - 创建/校验会话。
   - 落库 USER 消息与 PENDING assistant 消息。
   - 调模型并通过 SSE 返回增量。
+- 当前模型消息顺序：system prompt → 历史 conversation / tools → final user。
+- `categoryContexts` 支持 `15=本章剧情`、`11=扩写文本`、`13=后续剧情`；未传或内容为空的分类不注入。
+- `GET /v1/ai/context-items/selection-state` 读取生成设置页素材选择状态；高级功能开启后，前端用它自动加载角色库、词条库和后续关联库的勾选状态。
+- `PUT /v1/ai/context-items/selection-state` 保存生成设置页某个来源下的勾选状态。
 - AGENT 模式：
   - 工具集合由后端内部注册表控制。
-  - 最大循环轮数由后端固定控制，目前 `DEFAULT_MAX_ITERATIONS = 8`。
+  - 最大循环轮数由后端固定控制，目前 `DEFAULT_MAX_ITERATIONS = 12`。
   - 工具调用结果落库为 TOOL 消息，再回填下一轮模型上下文。
 
 ### 2.3 图片生成链路已落地
@@ -105,7 +112,7 @@
 
 - `app/service/prompt/prompt.service.ts`
   - `PromptService.detail(id, userId, { includeContent: true })`：作者编辑场景返回 `content`。
-  - 默认 `PromptService.detail(id, userId)`：不返回 `content`，供 AI 工具 `prompt.detail` 使用。
+  - 默认 `PromptService.detail(id, userId)`：不返回 `content`，AI 生成内部工具不再提供提示词模板查询能力。
   - 创建、更新、恢复版本后给作者返回 `content`。
   - 历史版本详情 `versionDetail()` 给作者返回 `content`。
   - 列表不返回 `content`，只返回参数/元数据。
@@ -116,6 +123,28 @@
   - 后端内部 `listActiveChain()` 仍读取完整内容供模型上下文使用。
 - `app/service/aiGeneration/image.service.ts`
   - 图片任务响应不返回最终 prompt 正文。
+
+### 2.5 角色库与词条库已接入上下文素材库
+
+相关文件：
+
+- `app/service/contextLibrary/contextSource.service.ts`
+- `app/service/contextLibrary/contextFolder.service.ts`
+- `app/service/contextLibrary/contextItem.service.ts`
+- `app/controller/v1/context-library/contextLibrary.ctrl.ts`
+- `app/service/aiGeneration/contextItem.service.ts`
+- `app/controller/v1/ai/contextItem.ctrl.ts`
+
+当前行为：
+
+- 角色库和词条库复用 `ContextSource` / `ContextItem` / `NovelContextBinding`。
+- `ContextFolder` 提供真实文件夹树，用于按来源组织角色和词条。
+- 角色库字段：姓名、性别、角色性格、角色设定与背景、外貌。
+- 词条库字段：词条名称、词条释义。
+- 创建/更新素材时，后端校验结构化字段并生成 `renderedText`，不信任前端提交最终上下文文本。
+- `/v1/ai/context-items` 必须传 `novelId`，只返回该作品素材库已绑定素材，支持按 `sourceKey`、`folderId` 查询。
+- 生成时仍只提交 `contextItemIds`，模型上下文读取对应 `renderedText`；这些素材必须属于 `metadata.novelId` 对应作品素材库。
+- 多个角色/词条按前端传入的 `contextItemIds` 顺序拼接，素材之间空行分隔，整体放在最终 user 消息中的“用户选择的上下文素材”段落。
 
 ---
 
@@ -161,22 +190,23 @@ bunx --bun tsc --noEmit
 - **不能因为传了 `metadata.novelId` 或 `metadata.chapterId`，后端就自动把作品简介/章节正文注入模型上下文。**
 - 真正进入模型的上下文，必须来自用户明确选择。
 
-### 4.2 上下文素材不强制绑定作品
+### 4.2 作品素材库
 
-用户已重新确认：不建议把人物卡、词条卡、备忘录设计为都绑定作品，也不建议把“人物卡/词条卡/备忘录”做成硬编码类型。
+用户已重新确认：作品对应单独素材库，没有“全局/非全局”之分。
 
-正确方向：
+当前方向：
 
-- 人物卡、词条卡、备忘录本质上都是作者级上下文素材。
-- 素材可以绑定到作品，但作品绑定只是“使用关系”，不是素材本体的唯一归属。
-- 同一素材后续可以复用于多个作品、系列、番外或临时生成场景。
-- 生成时是否可用由后端根据用户归属、全局可用性和作品绑定关系判断。
+- 人物卡、词条卡、备忘录本质上都通过统一上下文素材模型承载。
+- 素材进入某个作品素材库后，才会在该作品的 AI 生成设置中可选。
+- 生成时必须带 `metadata.novelId` 才能使用 `contextItemIds`。
+- AI 可选素材列表只返回当前作品素材库中的绑定素材。
+- 不允许跨用户、跨作品素材库注入上下文。
 
-后端后续必须校验：
+后端必须校验：
 
 - 用户选择的上下文项属于当前用户。
-- 若上下文项是全局可用素材，可直接被当前用户选择。
-- 若上下文项不是全局可用素材，且本次生成传了 `metadata.novelId`，则必须存在该素材与该作品的有效绑定关系。
+- 本次生成传了 `contextItemIds` 时，必须有 `metadata.novelId`。
+- 所有上下文项都必须属于当前作品素材库。
 - 不允许跨用户注入上下文。
 
 ### 4.3 不要在生成请求或 Prisma enum 中硬编码上下文类型
@@ -232,89 +262,49 @@ bunx --bun tsc --noEmit
 
 ---
 
-## 5. 当前代码与最新产品规则的冲突点
+## 5. 最新上下文分层规则
 
-必须优先修正：`contextResolver.service.ts` 当前仍会自动注入作品/章节上下文。
+当前代码已按最新规则调整：
 
-当前代码事实：
-
-- `GenerationContextInput.metadata` 包含 `novelId` / `chapterId` / `promptTemplateId` / `scene`。
-- `resolveGenerationContext()` 内部调用：
-
-```ts
-const workContext = await resolveNovelContext(
-  userId,
-  input.metadata?.novelId,
-  input.metadata?.chapterId,
-);
-```
-
-- `resolveNovelContext()` 当前行为：
-  - 传 `novelId` 时自动读取作品 `name` / `description` / `type` / `totalWords` 并放入上下文。
-  - 传 `chapterId` 时自动读取章节正文并放入上下文。
-
-这与用户最新规则冲突。
-
-下一轮应改为：
-
-1. `metadata.novelId` 只用于归属/筛选/校验，不自动注入内容。
-2. 新增 `contextItemIds?: number[]` 到文本生成与图片生成输入。
-3. 后端新增“上下文项解析”逻辑：只解析用户选择的 `contextItemIds`。
-4. 上下文项必须属于当前用户；若不是全局可用素材，且本次生成传了 `metadata.novelId`，则必须存在有效作品绑定关系。
-5. 不要在生成请求体或 Prisma enum 中硬编码 `type` / `ContextItemKind`。
-6. 如果当前还没有上下文素材表，先在文档中明确目标契约；代码层可先停止 `metadata` 自动注入，并等待 `ContextSource` / `ContextItem` / `NovelContextBinding` 数据模型落地。
+1. `metadata.novelId` 只用于归属/筛选/校验，不自动注入作品简介。
+2. `metadata.chapterId` 只用于归属/筛选/校验，不自动注入章节正文。
+3. `promptTemplateIds` 渲染结果进入 system prompt。
+4. `contextItemIds` 渲染文本进入最终 user 消息。
+5. `categoryContexts` 进入最终 user 消息，当前只接受：
+   - `categoryId=15`：本章剧情。
+   - `categoryId=11`：扩写文本。
+   - `categoryId=13`：后续剧情。
+6. 对应分类未传或内容为空时，不生成标题，也不注入空段落。
+7. 最终模型消息顺序为：system prompt → 历史 conversation / tools → final user。
 
 ---
 
-## 6. 建议下一轮执行计划
+## 6. 后续验证重点
 
-### 6.1 先做最小正确修正
-
-目标：马上停止错误的自动上下文注入。
-
-建议改动：
-
-1. 在 `app/service/aiGeneration/contextResolver.service.ts` 中移除或停用 `resolveNovelContext(userId, metadata.novelId, metadata.chapterId)` 的自动拼接。
-2. 保留 `metadata.scene` 是否注入需要再确认；它是用户输入的场景说明，当前会作为 `# 创作场景` 注入。若严格按“用户选择上下文”规则，`scene` 仍可视为本次生成的显式输入，不等同作品上下文。
-3. `metadata.novelId` 继续允许传入，用于会话 metadata 记录与列表筛选。
-4. 同步修改 `docs/api.md` / `docs/ai-generation.md`：明确 `metadata` 不自动进入模型上下文。
-5. 跑 `bunx --bun tsc --noEmit`。
-
-### 6.2 再设计上下文项体系
-
-不要让前端传硬编码 `type`。
-
-建议后续模型：
-
-- 作品下有统一的上下文项概念，例如 `NovelContextItem`。
-- 它可以覆盖：梗概、章节正文引用、人物卡、词条卡、备忘录等。
-- 前端先请求某作品的可选上下文项列表。
-- 生成请求只传 `contextItemIds`。
-- 后端按 `ContextSource` 配置和 `ContextItem.renderedText` 拼装上下文，生成链路不硬编码素材类型。
-
-目标模型：引入统一 `ContextItem` 与配置化 `ContextSource`。人物卡、词条卡、备忘录只是数据库里的来源配置，不是 Prisma enum，也不是生成请求里的 `type`。作品绑定通过 `NovelContextBinding` 表达“某作品可使用某素材”，不作为素材本体的唯一归属。
+- 执行 `bun run generate_script`，同步 controller schema 生成路由。
+- 执行 `bunx --bun tsc --noEmit`，确认新增 `categoryContexts` 与消息分层类型无误。
+- 在已迁移数据库和运行中服务上手测：
+  - 只传 `categoryId=15` 时只出现“本章剧情”。
+  - 不传 `categoryId=11/13` 或传空内容时不生成对应标题。
+  - `promptTemplateIds` 渲染结果进入 system，角色/词条和分类内容进入最终 user。
+  - 传 `metadata.novelId/chapterId` 不会自动注入作品简介或章节正文。
 
 ---
 
 ## 7. API 文档当前状态
 
-已同步过的文件：
+当前已同步：
 
 - `docs/api.md`
 - `docs/ai-generation.md`
 - `docs/ai-system-progress.md`（本文档）
 
-但 `docs/api.md` / `docs/ai-generation.md` 里仍可能存在“`metadata.novelId` 会拼装作品上下文”的旧描述。下一轮要统一改掉。
+重点约定：
 
-重点搜索关键词：
-
-- `metadata`
-- `novelId`
-- `chapterId`
-- `作品上下文`
-- `关联作品`
-- `promptTemplateId`
-- `promptInputs`
+- `metadata.novelId/chapterId` 不自动注入模型上下文。
+- `promptTemplateIds` 进入 system prompt。
+- `contextItemIds` 和 `categoryContexts` 进入最终 user。
+- 未传或内容为空的分类不注入。
 
 ---
 
@@ -327,8 +317,8 @@ const workContext = await resolveNovelContext(
 当前：
 
 - `AiMetadata`：`novelId?: number; chapterId?: number; promptTemplateId?: number; scene?: string;`
-- `CreateGenerationInput`：包含 `conversationId` / `userMessage` / `promptTemplateId` / `promptInputs` / `metadata` / `mode` / `modelId`。
-- `CreateImageGenerationInput`：包含 `prompt` / `promptTemplateId` / `promptInputs` / `metadata` / `size` / `quality` / `n` / `clientRequestId`。
+- `CreateGenerationInput`：包含 `conversationId` / `userMessage` / `promptTemplateIds` / `promptInputs` / `contextItemIds` / `categoryContexts` / `metadata` / `mode` / `modelId`。
+- `CreateImageGenerationInput`：包含 `prompt` / `promptTemplateId` / `promptInputs` / `contextItemIds` / `categoryContexts` / `metadata` / `size` / `quality` / `n` / `clientRequestId`。
 
 ### 8.2 请求 schema
 
@@ -338,18 +328,23 @@ const workContext = await resolveNovelContext(
 - `app/controller/v1/ai/images.ctrl.ts`
 - `app/controller/v1/ai/conversation.ctrl.ts`
 
-当前 schema 允许 `metadata.novelId` / `metadata.chapterId` / `metadata.promptTemplateId` / `metadata.scene`。
+当前 schema 允许：
 
-下一轮如新增 `contextItemIds`，需要同步 controller schema 与 service input 类型。
+- `metadata.novelId` / `metadata.chapterId` / `metadata.promptTemplateId` / `metadata.scene`。
+- 文本生成：`promptTemplateIds`、`contextItemIds`、`categoryContexts`。
+- 图片生成：`promptTemplateId`、`contextItemIds`、`categoryContexts`。
 
 ### 8.3 上下文解析
 
 文件：`app/service/aiGeneration/contextResolver.service.ts`
 
-当前冲突点：
+当前行为：
 
-- `resolveNovelContext()` 自动按 `metadata.novelId` / `metadata.chapterId` 拼上下文。
-- `resolveGenerationContext()` 会把 `workContext` 拼进 `contextText`。
+- 不存在基于 `metadata.novelId/chapterId` 的作品/章节正文自动注入。
+- `resolveContextItems()` 只解析用户传入的 `contextItemIds`。
+- `categoryContexts` 只保留 `15/11/13` 且内容非空的项，并按本章剧情 → 扩写文本 → 后续剧情顺序拼接。
+- `systemPromptText` 承载提示词模板渲染结果。
+- `finalUserPrompt` 承载素材、分类内容、场景和用户输入。
 
 ### 8.4 任务创建
 
@@ -358,7 +353,8 @@ const workContext = await resolveNovelContext(
 当前：
 
 - `createAndStart()` 会先解析 `resolveGenerationContext()`。
-- 然后把 `resolvedContext.renderedPrompt` 落库为 USER 消息。
+- USER 消息落库为 `resolvedContext.finalUserPrompt`，即素材/分类上下文 + 用户输入。
+- 提示词模板渲染结果不落入 USER 消息，运行时作为 system prompt 发给模型。
 - `metadata` 会落到会话/任务链路中。
 
 ### 8.5 图片生成
@@ -368,7 +364,8 @@ const workContext = await resolveNovelContext(
 当前：
 
 - 图片也复用 `resolveGenerationContext()`。
-- 因此也受 `metadata` 自动上下文注入问题影响。
+- 图片最终 prompt 由 `systemPromptText + finalUserPrompt` 拼接。
+- 图片请求也支持 `contextItemIds` 与 `categoryContexts`。
 
 ### 8.6 提示词详情/敏感边界
 
@@ -410,4 +407,4 @@ bunx --bun tsc --noEmit
 
 结果：通过。
 
-最后一次需要注意的未落地修正：**停止 `metadata.novelId/chapterId` 自动注入作品/章节上下文，改为用户选择的 `contextItemIds` 或后续统一上下文项体系。**
+本轮新增分层改动完成后仍需重新执行类型检查和必要的手工端到端验证。

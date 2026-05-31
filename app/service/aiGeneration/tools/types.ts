@@ -1,12 +1,19 @@
 import type { ChatToolDefinition } from "@/app/service/aiModel/adapter/types";
 
-/** AGENT 内部只读工具执行上下文。 */
+/** AGENT 内部工具执行上下文。 */
 export interface AgentToolContext {
   userId: number;
+  currentNovelId?: number;
+  currentChapterId?: number;
+  chapterContextWriteTarget?: {
+    novelId: number;
+    chapterId: number;
+  };
+  allowChapterContextWrite?: boolean;
   signal?: AbortSignal;
 }
 
-/** AGENT 内部只读工具定义。 */
+/** AGENT 内部工具定义。 */
 export interface AgentToolDefinition extends ChatToolDefinition {
   execute(
     context: AgentToolContext,

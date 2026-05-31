@@ -1,6 +1,6 @@
 # 后端 API 对接文档
 
-> 最后更新：2026-05-13  
+> 最后更新：2026-05-24  
 > 基础地址：`http://localhost:4000`（开发环境，由 `.env` PORT 配置）
 
 ---
@@ -271,6 +271,79 @@ GET /v1/user/:id
   }
 }
 ```
+
+### 2.3 编辑器 AI 快捷写作设置
+
+```
+GET /v1/user/preferences/editor-ai-quick-actions
+PUT /v1/user/preferences/editor-ai-quick-actions
+```
+
+保存当前登录用户的作品编辑器 AI 快捷写作设置。响应仍沿用项目现有 `$g.success()` 信封，即 `code: "SUCCESS"`。
+
+**响应 data：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `version` | number | 当前契约版本，固定为 `4` |
+| `bindings` | `{ actionId, key, enabled }[]` | 快捷键绑定状态 |
+| `actionSettings` | `EditorAiQuickActionSetting[]` | 每个快捷动作的提示词与上下文设置 |
+| `updatedAt` | string \| null | 最近保存时间，未保存过时为 `null` |
+
+`actionId` 取值：`aiContinueInline` / `aiPlotAdvice` / `aiExpandSelection`。
+
+`actionSettings` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `actionId` | string | 快捷动作 ID |
+| `promptMode` | `default` \| `custom` | 提示词来源模式 |
+| `promptCategoryId` | number \| null | 默认模式下选中的提示词分类 |
+| `promptCategoryName` | string \| null | 分类显示名，仅用于前端回显 |
+| `promptTemplateId` | number \| null | 默认模式下选中的提示词模板 |
+| `promptTemplateLabel` | string \| null | 模板显示名，仅用于前端回显 |
+| `customPrompt` | string | 自定义提示词，最长 1200 字符 |
+| `contextMode` | `auto` \| `cursorWindow` \| `fullChapter` | 当前章节上下文策略 |
+| `contextBeforeMaxLength` | number | 光标前上下文长度，范围 200-20000；保存时可省略，默认 4000 |
+| `contextAfterMaxLength` | number | 光标后上下文长度，范围 200-20000；保存时可省略，默认 1200 |
+| `chapterFullTextCount` | number | 章节设置：自动前文上下文中最近多少章使用正文，范围 0-20；更早章节优先用概要 |
+
+`promptMode = "custom"` 保存时会清空 `promptCategoryId`、`promptCategoryName`、`promptTemplateId`、`promptTemplateLabel`。
+
+GET 响应示例：
+
+```json
+{
+  "code": "SUCCESS",
+  "message": "",
+  "data": {
+    "version": 4,
+    "bindings": [
+      { "actionId": "aiContinueInline", "key": "Alt+1", "enabled": true },
+      { "actionId": "aiPlotAdvice", "key": "Alt+2", "enabled": true },
+      { "actionId": "aiExpandSelection", "key": "Alt+3", "enabled": true }
+    ],
+    "actionSettings": [
+      {
+        "actionId": "aiContinueInline",
+        "promptMode": "default",
+        "promptCategoryId": null,
+        "promptCategoryName": null,
+        "promptTemplateId": null,
+        "promptTemplateLabel": null,
+        "customPrompt": "",
+        "contextMode": "auto",
+        "contextBeforeMaxLength": 4000,
+        "contextAfterMaxLength": 1200,
+        "chapterFullTextCount": 3
+      }
+    ],
+    "updatedAt": null
+  }
+}
+```
+
+PUT 请求体为 `data` 内除 `updatedAt` 外的配置对象；`contextBeforeMaxLength` / `contextAfterMaxLength` 保存时可省略，后端会按默认值归一化并在响应里返回完整配置。
 
 ---
 
@@ -849,6 +922,67 @@ DELETE /v1/prompts/categories/:categoryId
 
 **响应：** `ApiEnvelope<boolean>`
 
+### 5.14 提示词收藏列表
+
+```
+GET /v1/prompts/favorites?page=1&pageSize=20
+```
+
+查询参数：
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `page` | 否 | 页码，默认 1 |
+| `pageSize` | 否 | 每页数量，默认 20 |
+
+响应示例：
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "items": [
+      {
+        "id": 7,
+        "name": "初稿速写",
+        "description": "适合网文快速开篇",
+        "usageGuide": "选择主题后回车即可",
+        "userId": 1,
+        "authorName": "admin",
+        "categoryId": 1,
+        "categoryName": "写作",
+        "favoritedAt": "2026-05-24T00:00:00.000Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+说明：按收藏时间逆序排列；已删除的提示词不会出现在列表中。
+
+### 5.15 收藏提示词
+
+```
+PUT /v1/prompts/favorites/:promptTemplateId
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `:promptTemplateId` | number | 是 | 提示词模板 ID |
+
+说明：重复调用幂等，不会报错。
+
+### 5.16 取消收藏提示词
+
+```
+DELETE /v1/prompts/favorites/:promptTemplateId
+```
+
+说明：重复调用幂等，不会报错。
+
 ---
 
 ## 6. 创意工具 API
@@ -928,7 +1062,289 @@ DELETE /v1/creative-tools/:id
 
 ---
 
-## 7. AI 系统 API
+## 6.5 上下文素材库 API
+
+> 路由前缀 `/v1/context-library`，需要 `context_library.manage` 权限；`GET /sources` 仅需登录。角色库和词条库都复用统一上下文素材模型，前端不向生成接口传素材类型，只在生成时提交选中的 `contextItemIds`。
+
+### 6.5.1 来源列表
+
+```
+GET /v1/context-library/sources
+```
+
+返回启用的素材来源，目前包含：
+
+| key | name | 说明 |
+| --- | --- | --- |
+| `character` | 角色库 | 姓名、性别、角色性格、角色设定与背景、外貌 |
+| `glossary` | 词条库 | 词条名称、词条释义 |
+| `memo` | 备忘录 | 标题、内容、作用域；建议使用 `/v1/memos` 管理全局/作品备忘录 |
+
+### 6.5.2 文件夹树
+
+```
+GET /v1/context-library/folders?novelId=1&sourceKey=character
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `novelId` | number | 是 | 作品 ID |
+| `sourceKey` | `character` \| `glossary` | 是 | 来源键 |
+
+### 6.5.3 创建文件夹
+
+```
+POST /v1/context-library/folders
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `novelId` | number | 是 | 作品 ID |
+| `sourceKey` | string | 是 | `character` 或 `glossary` |
+| `name` | string | 是 | 文件夹名称 |
+| `parentId` | number \| null | 否 | 父文件夹 ID |
+| `sortOrder` | number | 否 | 同级排序 |
+
+### 6.5.4 更新、移动、删除文件夹
+
+```
+PUT /v1/context-library/folders/:id
+PUT /v1/context-library/folders/:id/move
+DELETE /v1/context-library/folders/:id
+```
+
+删除文件夹为软删除；子文件夹和素材会移动到被删文件夹的上级。
+
+### 6.5.5 素材列表
+
+```
+GET /v1/context-library/items?novelId=1&sourceKey=character&folderId=1&keyword=主角
+```
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `novelId` | number | 作品 ID，必填 |
+| `sourceKey` | string | `character` / `glossary`，不传则查该作品全部上下文库素材 |
+| `folderId` | number | 文件夹 ID |
+| `keyword` | string | 匹配标题或摘要 |
+| `page` / `pageSize` | number | 分页 |
+
+### 6.5.6 创建素材
+
+```
+POST /v1/context-library/items
+```
+
+角色库请求体：
+
+```json
+{
+  "novelId": 1,
+  "sourceKey": "character",
+  "folderId": 1,
+  "data": {
+    "name": "沈青崖",
+    "gender": "男",
+    "personality": "冷静克制，重诺守信",
+    "background": "边城孤儿，被剑宗长老收养。",
+    "appearance": "黑发灰眼，常穿旧青衫。"
+  }
+}
+```
+
+词条库请求体：
+
+```json
+{
+  "novelId": 1,
+  "sourceKey": "glossary",
+  "folderId": 2,
+  "data": {
+    "name": "归墟海",
+    "definition": "世界尽头的黑潮海域，吞噬灵气与记忆。"
+  }
+}
+```
+
+后端会根据 `sourceKey` 校验字段，并生成 `renderedText` 供 AI 上下文使用；不信任前端提交最终上下文文本。
+
+### 6.5.7 素材详情、更新、删除
+
+```
+GET /v1/context-library/items/:id?novelId=1
+PUT /v1/context-library/items/:id?novelId=1
+DELETE /v1/context-library/items/:id?novelId=1
+```
+
+更新素材时传 `data` 会重新生成 `title`、`summary`、`renderedText`。
+
+### 6.5.8 AI 上下文选择
+
+返回当前作品（或章节）素材库内可选的上下文素材。选择状态按 `chapterId` 隔离，不传即作品级。
+
+查询候选素材：
+
+```
+GET /v1/ai/context-items?novelId=1&sourceKey=character&folderId=1
+GET /v1/ai/context-items?novelId=1&sourceKey=memo&chapterId=3
+```
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `novelId` | number | 作品 ID，必填 |
+| `sourceKey` | string | 不传返回全部来源 |
+| `folderId` | number | 文件夹筛选 |
+| `keyword` | string | 搜索标题或摘要 |
+| `chapterId` | number | 章节 ID；传入后仅返回关联该章节的素材 |
+
+获取上次保存的勾选状态：
+
+```
+GET /v1/ai/context-items/selection-state?novelId=1
+GET /v1/ai/context-items/selection-state?novelId=1&chapterId=3
+```
+
+保存某个来源的勾选状态：
+
+```
+PUT /v1/ai/context-items/selection-state
+```
+
+```json
+{
+  "novelId": 1,
+  "chapterId": 3,
+  "sourceKey": "memo",
+  "contextItemIds": [5, 6]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `novelId` | number | 是 | 作品 ID |
+| `chapterId` | number | 否 | 章节 ID；不传为作品级 |
+| `sourceKey` | string | 是 | `character` / `glossary` / `memo` |
+| `contextItemIds` | number[] | 否 | 选中素材 ID；传 `[]` 清空 |
+
+生成接口仍只提交：
+
+```json
+{
+  "metadata": { "novelId": 1 },
+  "contextItemIds": [101, 205]
+}
+```
+
+`metadata.novelId` 只用于归属和绑定校验，不自动注入作品内容。全局备忘录会在任意作品的上下文候选中出现；作品备忘录只在对应作品中出现。
+
+## 7. 备忘录 API
+
+> 路由前缀 `/v1/memos`，需要 `context_library.manage` 权限。备忘录属于素材库；被 AI 上下文选择关联后，会随 `contextItemIds` 注入生成上下文。
+
+### 7.1 作用域
+
+| scope | 说明 |
+| --- | --- |
+| `GLOBAL` | 全局备忘录，不绑定作品；在任意作品的上下文候选中可见 |
+| `NOVEL` | 作品备忘录，必须绑定 `novelId`；只在对应作品中可见 |
+
+### 7.2 文件夹树
+
+```
+GET /v1/memos/folders?scope=GLOBAL
+GET /v1/memos/folders?scope=NOVEL&novelId=1
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `scope` | `GLOBAL` \| `NOVEL` | 是 | 文件夹作用域 |
+| `novelId` | number | `NOVEL` 必填 | 作品 ID |
+
+### 7.3 创建文件夹
+
+```
+POST /v1/memos/folders
+```
+
+```json
+{
+  "scope": "NOVEL",
+  "novelId": 1,
+  "parentId": null,
+  "name": "伏笔",
+  "sortOrder": 0
+}
+```
+
+### 7.4 更新、移动、删除文件夹
+
+```
+PUT /v1/memos/folders/:id
+PUT /v1/memos/folders/:id/move
+DELETE /v1/memos/folders/:id
+```
+
+删除文件夹为软删除；子文件夹和备忘录会移动到被删文件夹的上级。
+
+### 7.5 备忘录列表
+
+```
+GET /v1/memos?scope=GLOBAL&keyword=主线
+GET /v1/memos?scope=NOVEL&novelId=1&folderId=2
+```
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `scope` | `GLOBAL` \| `NOVEL` | 不传则查询当前用户全部备忘录 |
+| `novelId` | number | 查询作品备忘录时传入 |
+| `folderId` | number | 文件夹 ID |
+| `keyword` | string | 匹配标题、摘要或正文 |
+| `page` / `pageSize` | number | 分页 |
+
+### 7.6 创建备忘录
+
+```
+POST /v1/memos
+```
+
+全局备忘录：
+
+```json
+{
+  "scope": "GLOBAL",
+  "folderId": null,
+  "title": "通用风格",
+  "content": ""
+}
+```
+
+作品备忘录：
+
+```json
+{
+  "scope": "NOVEL",
+  "novelId": 1,
+  "folderId": 2,
+  "title": "第三卷伏笔",
+  "content": "玉佩裂纹对应旧王朝血脉。"
+}
+```
+
+说明：`content` 允许为空字符串，便于前端先创建空白备忘录；最大 20000 字符。
+
+### 7.7 备忘录详情、更新、删除
+
+```
+GET /v1/memos/:id
+PUT /v1/memos/:id
+DELETE /v1/memos/:id
+```
+
+更新 `title` 或 `content` 会重新生成供 AI 使用的 `renderedText`。
+
+---
+
+## 8. AI 系统 API
 
 > 路由涉及三个前缀：`/v1/ai/models`（前端模型）、`/v1/ai/conversations`（会话与消息）、`/v1/ai/generation`（文本生成 SSE）、`/v1/ai/images`（图片生成），全部需要登录。
 > 管理端路由前缀 `/v1/admin/ai`，需要 `ADMIN` 角色与 `ai.model.manage` 权限。
@@ -1144,7 +1560,7 @@ GET /v1/ai/conversations/:id/messages
 
 **响应：** `ApiEnvelope<{ items: AiMessageItem[], cursor: number | null, hasMore: boolean }>`
 
-> 消息列表不返回后端渲染后的用户提示词和工具结果正文：`USER` / `TOOL` 消息的 `content` 为空，并带 `contentRedacted: true`；`ASSISTANT` 消息正文正常返回。
+> 消息列表用于前端聊天展示，不返回模型真实输入、system prompt、提示词模板正文、内部上下文或工具结果正文。新生成的 `USER.content` 只保存安全展示文本；旧数据或未标记为安全展示的 `USER`、以及所有 `TOOL` 消息会返回空 `content` 并带 `contentRedacted: true`。`ASSISTANT` 消息正文正常返回；如果供应商返回 DeepSeek `reasoning_content`，`ASSISTANT` 会额外返回 `reasoningContent`。产生多段改文提案的 `ASSISTANT` 会额外返回 `editProposal`，结构与 SSE `edit.proposal` 一致；其中不包含完整 `baseText`、系统提示词、工具结果正文或 `renderedText`。新生成的 `USER` 消息会额外返回 `generationInput`，结构与客户端发起 `POST /v1/ai/generation/stream` 的请求体一致，用于前端回显当次生成所选提示词、角色库/素材库 ID、分类上下文和业务 metadata。
 
 ```json
 {
@@ -1152,12 +1568,61 @@ GET /v1/ai/conversations/:id/messages
   "data": {
     "items": [
       {
+        "id": 9,
+        "conversationId": 1,
+        "parentMessageId": 8,
+        "role": "USER",
+        "status": "ACTIVE",
+        "content": "帮我续写这段剧情",
+        "generationInput": {
+          "conversationId": 1,
+          "mode": "AGENT",
+          "modelId": 1,
+          "userMessage": "帮我续写这段剧情",
+          "promptTemplateIds": [11],
+          "promptInputs": { "类型": "玄幻" },
+          "contextItemIds": [101],
+          "categoryContexts": [
+            { "categoryId": 15, "content": "本章主角进入灵脉遗迹。" }
+          ],
+          "metadata": { "novelId": 1, "chapterId": 3 },
+          "temperature": 0.8
+        },
+        "toolCalls": null,
+        "toolCallId": null,
+        "toolName": null,
+        "tokenUsage": null,
+        "modelId": null,
+        "jobId": 3,
+        "seq": 3,
+        "createdAt": "2026-05-11T10:29:00.000Z",
+        "updatedAt": "2026-05-11T10:29:00.000Z"
+      },
+      {
         "id": 10,
         "conversationId": 1,
         "parentMessageId": 9,
         "role": "ASSISTANT",
         "status": "ACTIVE",
         "content": "好的，我来为你续写这段剧情...",
+        "reasoningContent": "我需要延续遗迹场景，并保持主角目标一致。",
+        "editProposal": {
+          "mode": "novel_multi_diff",
+          "documentId": "chapter-3",
+          "baseHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "baseLength": 0,
+          "summary": "已生成 1 处编辑提案",
+          "operations": [
+            {
+              "id": "op-1",
+              "type": "replace",
+              "range": { "start": 0, "end": 0 },
+              "oldText": "",
+              "newText": "灵脉深处传来低沉的轰鸣。",
+              "reason": "补充遗迹压迫感"
+            }
+          ]
+        },
         "toolCalls": null,
         "toolCallId": null,
         "toolName": null,
@@ -1206,31 +1671,135 @@ POST /v1/ai/generation/stream
 
 **请求体：**
 
-前端只传生成意图和业务输入：`mode`、`modelId` 必填；`promptTemplateId` 与 `promptInputs` 是主入口；后端负责读取提示词模板、替换 `{{变量}}`，并只把用户明确选择的 `contextItemIds` 解析为模型上下文。`metadata.novelId` / `metadata.chapterId` 只表示业务关联和筛选条件，不自动注入作品简介或章节正文。`conversationId` 可选，未传时后端会创建会话，并通过 `job.created` SSE 事件返回 `conversationId`。`userMessage` 仅作为兼容补充输入使用。
+前端只传生成意图和业务输入：`mode`、`modelId` 必填；`promptTemplateIds` 与 `promptInputs` 是主入口；后端负责读取提示词模板、替换 `{{变量}}`，并把渲染后的提示词放入 system prompt。`contextItemIds`、`categoryContexts` 和显式章节字段属于用户明确选择/输入的创作素材，会和 `userMessage` 一起组成本次生成输入；首轮生成时该输入作为 system 下发给模型，已有历史的续聊才作为本轮 user 消息下发。`metadata.novelId` / `metadata.chapterId` 主要表示业务关联和筛选条件；普通生成不会自动注入作品简介或章节正文。作品编辑器快捷写作复用 `metadata.scene` 传动作标识，并可通过 `metadata.quickWriting.chapterFullTextCount` 控制本次自动章节上下文；这些运行态字段不会持久化为会话场景，也不会被后续普通生成继承。`editorDiff` 是可选运行态输入，显式传入时本次生成改为返回多段改文提案，不直接修改章节正文，也不写入会话 `metadata`；`aiContinueInline`、`aiPlotAdvice`、`aiExpandSelection` 三个快捷动作不支持同时传入 `editorDiff`。快捷动作未显式传 `promptTemplateIds` 时，后端会按 `categoryContexts.categoryId` 读取用户保存的分类提示词状态。`conversationId` 可选，未传时后端会创建会话，并通过 `job.created` SSE 事件返回 `conversationId`。`userMessage` 仅作为兼容补充输入使用。
 
 | 字段               | 类型                   | 必填 | 说明                                                         |
 | ------------------ | ---------------------- | ---- | ------------------------------------------------------------ |
 | `mode`             | `STANDARD` \| `AGENT`  | 是   | 生成模式                                                     |
 | `modelId`          | number                 | 是   | 前端选择的模型槽位 ID                                        |
 | `conversationId`   | number                 | 否   | 已有会话 ID；未传时由后端创建新会话                          |
-| `promptTemplateId` | number                 | 否   | 提示词模板 ID；未传 `userMessage` 时必须提供，可从会话 `metadata.promptTemplateId` 兜底 |
-| `promptInputs`     | Record<string, unknown> | 否   | 提示词变量键值对，例如模板 `写{{类型}}的物品{{数量}}` 对应 `{ "类型": "玄幻", "数量": 3 }` |
-| `userMessage`      | string                 | 否   | 兼容补充输入，1~16000 字符；会追加到模板渲染结果之后          |
-| `contextItemIds`   | number[]               | 否   | 用户明确选择要注入模型的上下文素材 ID；生成请求不传、不依赖硬编码 `type` |
-| `metadata`         | object                 | 否   | 业务引用：`novelId` / `chapterId` / `promptTemplateId` / `scene`；不自动注入模型上下文 |
+| `promptTemplateIds` | number[]               | 否   | 提示词模板 ID 列表；渲染结果进入 system prompt，可从会话 `metadata.promptTemplateId` 兜底 |
+| `promptInputs`      | Record<string, unknown> | 否   | 提示词变量键值对，例如模板 `写{{类型}}的物品{{数量}}` 对应 `{ "类型": "玄幻", "数量": 3 }` |
+| `userMessage`       | string                 | 否   | 兼容补充输入；会进入本次生成输入，首轮作为 system 下发，续聊作为当前 user 下发 |
+| `contextItemIds`    | number[]               | 否   | 用户明确选择要注入模型的上下文素材 ID；生成请求不传、不依赖硬编码 `type` |
+| `chapterIds`         | number[]               | 否   | 显式注入的正文章节 ID；传入后优先于快捷写作自动章节策略 |
+| `chapterSummaryIds`  | number[]               | 否   | 显式注入的概要章节 ID；传入后优先于快捷写作自动章节策略 |
+| `categoryContexts`  | `{ categoryId, content }[]` | 否 | 分类上下文；`categoryId` 为提示词分类 ID，后端用分类名称渲染上下文标题，未传或内容为空则不注入 |
+| `metadata`          | object                 | 否   | 业务引用：`novelId` / `chapterId` / `promptTemplateId` / `scene`；快捷写作可附带运行态 `quickWriting.chapterFullTextCount` |
+| `editorDiff`        | object                 | 否   | 多段改文提案运行态输入；传入后最终输出走 `edit.proposal`，不流出原始 JSON；`aiContinueInline` / `aiPlotAdvice` / `aiExpandSelection` 不支持该字段 |
 
 ```json
 {
   "mode": "AGENT",
   "modelId": 1,
-  "promptTemplateId": 1,
+  "promptTemplateIds": [1],
   "promptInputs": { "类型": "玄幻", "数量": 3 },
   "contextItemIds": [101, 102, 205],
+  "categoryContexts": [
+    { "categoryId": 15, "content": "本章主角进入灵脉遗迹。" },
+    { "categoryId": 13, "content": "下一章揭露灵脉异变来源。" }
+  ],
   "metadata": { "novelId": 1, "chapterId": 3 }
 }
 ```
 
-运行控制归后端：`temperature` 来自模型槽位/模型定义配置，AGENT 工具集合由后端内部注册表开放，最大迭代轮数由后端固定控制。文本生成入口不要求前端传幂等键。
+**多段改文提案：**
+
+`editorDiff.mode` 支持两种运行方式：
+
+| mode | 适用场景 | 前端是否传正文 |
+| --- | --- | --- |
+| `novel_multi_diff` | 前端已经确定正在编辑的章节或文档 | 是 |
+| `chapter_auto_diff` | 显式强制“按自然语言定位章节并返回改文提案”；普通 `AGENT` 也可在未传 `editorDiff` 时由模型自主产生同类提案 | 否，模型通过 AGENT 章节工具定位并读取章节 |
+
+`novel_multi_diff` 下，后端要求模型输出结构化编辑提案，并在服务端校验 `baseHash`、range、重叠和 `oldText`。后端不直接改文；前端收到 `edit.proposal` 后，应先校验当前文档仍匹配 `docVersion` / `baseHash`，再预览或按多段 range 应用 patch。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `mode` | `novel_multi_diff` | 是 | 启用多段编辑提案模式 |
+| `documentId` | string | 否 | 前端文档标识，原样带回 |
+| `docVersion` | string | 否 | 前端文档版本，原样带回 |
+| `baseHash` | string | 是 | `baseText` 的 SHA-256 hex |
+| `baseText` | string | 是 | 发起生成时的编辑器文档快照 |
+| `caretOffset` | number | 是 | 发起生成时的光标 offset，必须在 `baseText` 范围内 |
+| `selection` | `{ start, end }` | 否 | 发起生成时的选区，使用 JavaScript `slice` offset |
+| `intent` | string | 否 | 用户意图，例如续写、润色、扩写、重写选区 |
+
+```json
+{
+  "mode": "STANDARD",
+  "modelId": 1,
+  "userMessage": "把选区改得更有压迫感",
+  "editorDiff": {
+    "mode": "novel_multi_diff",
+    "documentId": "chapter-3",
+    "docVersion": "42",
+    "baseHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "baseText": "",
+    "caretOffset": 0,
+    "selection": { "start": 0, "end": 0 },
+    "intent": "rewrite_selection"
+  }
+}
+```
+
+返回的每个 operation 都是 `replace`：`range` 为原文区间，`oldText` 必须等于 `baseText.slice(start, end)`，`newText` 为替换文本；多段 operation 已按起点升序排列且互不重叠。
+
+`chapter_auto_diff` 也可以作为显式强制提案路径使用：仅支持 `AGENT`，前端传入 `editorDiff: { "mode": "chapter_auto_diff" }` 后，模型必须通过章节工具定位并读取目标章节，后端根据工具结果生成内部快照。模型先产出候选编辑提案；该候选提案不会先发给前端，后端会基于已校验的 `operations[].newText` 和应用后的候选正文要求模型调用 `chapter_context_sync`，同步完成后才下发最终 `edit.proposal`。如果前端不传 `editorDiff`，普通 `AGENT` 仍可由模型自主判断是否需要改文；模型读取章节后，只有最终内容通过编辑提案校验时才返回 `edit.proposal`，否则按普通文本回答。后端不会根据 `userMessage` 关键词自动切换模式。
+
+```json
+{
+  "mode": "AGENT",
+  "modelId": 1,
+  "userMessage": "帮我修改第十二章，让冲突更激烈",
+  "metadata": { "novelId": 1 },
+  "editorDiff": { "mode": "chapter_auto_diff" }
+}
+```
+
+`chapter_auto_diff` 成功时，`edit.proposal` 会包含 `target`：
+
+```json
+{
+  "mode": "chapter_auto_diff",
+  "target": {
+    "novelId": 1,
+    "chapterId": 12,
+    "chapterTitle": "第十二章 风雨欲来"
+  },
+  "documentId": "chapter-12",
+  "docVersion": "2026-05-29T10:00:00.000Z",
+  "baseHash": "...",
+  "baseLength": 12345,
+  "operations": []
+}
+```
+
+如果显式 `chapter_auto_diff` 无法唯一定位章节，任务会以 `EDITOR_DIFF_TARGET_REQUIRED` 失败；前端可提示用户先选择或明确章节。未显式传 `editorDiff` 的普通 `AGENT` 对话中，模型可按需调用章节工具：如果最终返回合法编辑提案，前端会在素材同步完成后收到 `edit.proposal`；如果只是询问、分析或建议，前端继续按普通消息展示。
+
+**章节正文生成中的素材维护：**
+
+当一次生成绑定当前章节，或 `chapter_auto_diff` / 普通 AGENT 改文已通过工具定位到目标章节，并且属于章节正文写作/改写场景时，后端会在同一次模型工具循环里开放内部写入工具 `chapter_context_sync`。模型需要在最终正文或最终 `edit.proposal` 前，通过该工具提交本章明确出现的角色和词条；每个角色/词条都必须携带 `folderPath`，用于把素材归纳到角色库或词条库的文件夹路径中。后端会按当前作品、来源和同名标题 upsert，已有素材合并更新，不存在则创建并绑定到当前作品；若 `folderPath` 对应文件夹不存在，后端会自动创建并把素材放入该文件夹。改文提案链路中，写入工具只会在候选提案正文已经生成并通过后端结构校验后开放；同步依据是候选 `operations[].newText` 和应用提案后的候选正文，不使用空章节原文或未落地的剧情建议作为同步输入。
+
+该能力不新增前端请求字段、不新增外部 API、不直接写回章节正文。`aiPlotAdvice` 这类只给建议的场景、普通聊天和普通素材查询不会开放章节素材同步工具。写入工具的 SSE `tool.call` 参数只返回脱敏标记；`tool.result` 只返回安全摘要，例如 `chapter_context_sync` 返回 `chapterId`、`characterCount`、`glossaryCount`、`createdCount`、`updatedCount`，以及每个同步素材的 `id`、`title`、`sourceKey`、`folderId`、`folderPath`、`action`；`memo_write` 返回 `id`、`title`、`scope`、`novelId`、`folderId`、`sortOrder` 等摘要。前端可据此告知“已创建/更新素材或备忘录”，不需要向用户发起批准，也不要展示完整素材正文或备忘录正文。
+
+绑定当前作品的普通 AGENT 还可获得 `context_item_organize` 和 `memo_write`：前者只整理已有角色库/词条库素材的单层文件夹归属，后者只创建或编辑备忘录文本。二者是否调用由模型依据工具说明和当前请求自行判断，后端不按用户话术关键词硬编码开关；执行层会校验当前用户、当前作品、素材来源、备忘录作用域和归属。
+
+前端如果需要展示最新角色/词条列表，可在生成成功后刷新素材库列表接口。
+
+**作品编辑器快捷动作：**
+
+`metadata.scene` 命中以下值时，后端会把它识别为一次性快捷动作标识，不会把该值当作普通创作场景注入，也不会持久化为会话场景。快捷动作的任务约束来自现有提示词体系：请求显式传入的 `promptTemplateIds` 优先；未传时，后端按 `categoryContexts.categoryId` 读取用户保存的分类提示词状态并渲染对应提示词模板。这三个快捷动作只走普通生成，不支持随请求传入 `editorDiff`。
+
+| scene | 前端动作 | 提示词来源 | 章节上下文 |
+| --- | --- | --- | --- |
+| `aiContinueInline` | 行内续写 | 请求显式模板，或当前分类上下文对应的用户分类提示词状态 | 未显式传章节字段时，可按 `metadata.quickWriting.chapterFullTextCount` 自动追加前文 |
+| `aiPlotAdvice` | 剧情建议 | 请求显式模板，或当前分类上下文对应的用户分类提示词状态 | 未显式传章节字段时，可按 `metadata.quickWriting.chapterFullTextCount` 自动追加前文 |
+| `aiExpandSelection` | 选区扩写 | 请求显式模板，或当前分类上下文对应的用户分类提示词状态 | 未显式传章节字段时，可按 `metadata.quickWriting.chapterFullTextCount` 自动追加前文 |
+
+自动章节策略只在 `chapterIds` / `chapterSummaryIds` 都未显式传入时生效：以 `metadata.chapterId` 定位当前章节，按作品章节顺序只取当前章节之前的前文，避免和编辑器传入的当前正文重复；最近 `chapterFullTextCount` 章使用正文，更早章节优先使用概要，概要缺失时用正文兜底。该字段只影响本次上下文解析，不写入会话 `metadata`。
+
+运行控制归后端：`temperature` 来自模型槽位/模型定义配置，AGENT 查询工具集合由后端内部注册表开放，章节正文写作/改写链路可临时开放内部写入工具，最大迭代轮数由后端固定控制。若本次请求已经绑定 `metadata.novelId`，后端不会向模型暴露 `novel_list`，且所有作品、章节、素材工具调用都会被限制在当前作品内；模型即使传入其他作品 ID，也会被服务端拒绝。角色库、词条库和备忘录由模型按需调用工具查询，后端不会在 AGENT 入口自动预查询。文本生成入口不要求前端传幂等键。
 
 **响应：** HTTP 200，`Content-Type: text/event-stream`。
 
@@ -1247,26 +1816,35 @@ POST /v1/ai/generation/stream
 | 事件                | 触发时机                     | data 字段                                                    |
 | ------------------- | ---------------------------- | ------------------------------------------------------------ |
 | `job.created`       | 任务创建成功                 | `{ jobId, conversationId }`                                  |
-| `message.delta`     | 模型流式输出文本片段（N 次） | `{ jobId, messageId, delta: string }`                        |
-| `message.completed` | 一条 assistant 消息完成      | `{ jobId, messageId, content, usage?, toolCalls? }`          |
+| `message.delta`     | 模型流式输出文本片段（N 次）；`editorDiff` 模式不会下发原始 JSON | `{ jobId, messageId, delta: string }`                        |
+| `message.reasoning_delta` | 模型流式输出思考片段（N 次，仅供应商返回时存在） | `{ jobId, messageId, delta: string }`                        |
+| `edit.proposal`     | `editorDiff` 模式下编辑提案校验通过 | `{ jobId, messageId, mode, target?, documentId?, docVersion?, baseHash, baseLength, operations, caret?, cursor?, summary? }` |
+| `message.completed` | 一条 assistant 消息完成      | `{ jobId, messageId, content, reasoningContent?, usage?, toolCalls? }` |
 | `tool.call`         | AGENT 模式工具调用（M 次）   | `{ jobId, toolCallId, name, arguments }`                     |
 | `tool.result`       | 工具执行结果（M 次）         | `{ jobId, toolCallId, name, result }`                        |
 | `job.iteration`     | AGENT 每轮循环结束           | `{ jobId, iteration, maxIterations }`                        |
 | `job.succeeded`     | 任务成功完成                 | `{ jobId, result? }`                                         |
 | `job.failed`        | 任务失败                     | `{ jobId, errorCode, message }`                              |
 | `job.canceled`      | 任务被取消                   | `{ jobId }`                                                  |
-| `keepalive`         | 心跳保活                     | `{ ts }`                                                     |
+| `keepalive`         | 定时心跳保活（间隔由 `SSE_KEEPALIVE_INTERVAL_MS` 配置，默认 15s） | `{ ts }`                                                     |
 
-提示词正文是敏感信息：SSE 不发送后端渲染后的 `USER` 提示词；`prompt.detail` 等 AGENT 工具结果只返回模板元数据和 `presetOptions`，不返回 `content`。
+提示词正文是敏感信息：SSE 不发送后端渲染后的 `USER` 提示词；`editorDiff` 模式不发送模型原始 JSON，仅发送校验后的 `edit.proposal`，`message.completed.content` 只保存短摘要。校验后的 `edit.proposal` 会作为 `ASSISTANT.editProposal` 进入消息列表历史，供前端刷新后恢复提案卡片；历史中的提案不包含完整 `baseText`、系统提示词、工具结果正文或 `renderedText`。AGENT 工具结果只返回作品、章节和素材库查询结果，不提供提示词模板查询能力；章节同步写入工具只返回脱敏摘要。DeepSeek thinking mode 返回的 `reasoning_content` 会通过 `message.reasoning_delta` 流式发送，并在 `message.completed.reasoningContent` 与消息列表 `ASSISTANT.reasoningContent` 中返回。
+
+章节正文写作/改写链路可能出现 `chapter_context_sync` 工具事件。该工具属于内部写入能力，只在当前章节写入目标内 upsert 本章角色/词条；前端可根据 `tool.result.result.createdCount` / `updatedCount` 和 `items[].action` 展示“已创建/更新素材库”的安全告知，不需要用户批准，也不要依赖或展示工具参数详情。
+
+用户明确要求整理已有角色库/词条库文件夹时，AGENT 可能出现 `context_item_organize` 工具事件。该工具只整理当前作品内已有角色/词条素材的单层 `folderId`，不修改素材正文、章节正文、备忘录或全局备忘录；前端可展示“已整理素材库分类”的安全告知，并在任务成功后刷新素材库文件夹树和列表。
 
 **上下文选择约定：**
 
+- 实际发给模型的顺序为：system prompt → 历史 conversation / tools → 本次输入。没有有效历史时，本次输入作为 system 下发，并追加一条中性 user 触发消息；已有历史时，本次输入作为当前 user 消息下发。
+- 用户创建/选择的提示词模板经后端渲染后进入 system prompt，不和素材、本章剧情混在一起。
 - `contextItemIds` 来自后端提供的可选上下文素材列表，不由前端自行构造。
 - 生成请求不传 `type`，也不传“人物卡/词条卡/备忘录”等硬编码枚举。
-- 后端根据 `ContextItem.sourceId` 关联的 `ContextSource` 配置校验、排序并读取 `renderedText` 注入模型上下文。
+- 后端根据 `ContextItem.sourceId` 关联的 `ContextSource` 配置校验、排序并读取 `renderedText` 注入本次生成输入。
+- `categoryContexts` 使用提示词分类 ID；后端读取分类名称作为上下文标题，未传、内容为空或分类不存在时不注入该段内容。
 - `ContextSource` 是数据库配置；新增“世界观卡”“伏笔卡”等来源不应影响生成接口。
 
-**可选上下文项列表（目标接口，待上下文素材域落地）：**
+**作品素材项列表：**
 
 ```
 GET /v1/ai/context-items
@@ -1274,8 +1852,10 @@ GET /v1/ai/context-items
 
 | 参数      | 类型   | 默认 | 说明                                      |
 | --------- | ------ | ---- | ----------------------------------------- |
-| `novelId` | number | —    | 可选；返回全局可用素材和该作品绑定的素材 |
-| `keyword` | string | —    | 可选；按标题/摘要搜索                    |
+| `novelId`   | number | —    | 必填；只返回该作品素材库中已绑定的素材 |
+| `keyword`   | string | —    | 可选；按标题/摘要搜索                    |
+| `sourceKey` | string | —    | 可选；按来源筛选，例如 `character`、`glossary`，后续可扩展关联库来源 |
+| `folderId`  | number | —    | 可选；按文件夹筛选                      |
 
 响应项示例：
 
@@ -1285,41 +1865,122 @@ GET /v1/ai/context-items
   "data": [
     {
       "id": 101,
-      "source": { "id": 1, "name": "人物卡" },
+      "source": { "id": 1, "key": "character", "name": "角色库" },
+      "folderId": null,
       "title": "林秋",
       "summary": "男主，阵修，性格冷静",
-      "global": false,
-      "bound": true
+      "selected": true
     }
   ]
+}
+```
+
+**生成设置页素材选择状态：**
+
+```
+GET /v1/ai/context-items/selection-state?novelId=1
+PUT /v1/ai/context-items/selection-state
+```
+
+用于高级功能开启后自动加载角色库、词条库和后续关联库的勾选状态。该状态保存的是“生成设置页的上一次选择”，不是最近一次生成任务历史。
+
+PUT 请求体：
+
+| 字段             | 类型     | 必填 | 说明 |
+| ---------------- | -------- | ---- | ---- |
+| `novelId`        | number   | 是   | 作品 ID |
+| `sourceKey`      | string   | 是   | 来源 key，例如 `character`、`glossary` |
+| `contextItemIds` | number[] | 否   | 该来源下当前勾选的素材 ID，空数组表示清空 |
+
+响应示例：
+
+```json
+{
+  "code": "SUCCESS",
+  "data": {
+    "novelId": 1,
+    "groups": [
+      {
+        "source": { "id": 1, "key": "character", "name": "角色库" },
+        "contextItemIds": [101, 102],
+        "selectedContextItemIds": [101],
+        "items": [
+          {
+            "id": 101,
+            "source": { "id": 1, "key": "character", "name": "角色库" },
+            "folderId": null,
+            "title": "林秋",
+            "summary": "男主，阵修，性格冷静",
+            "selected": true
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
 **SSE 典型 STANDARD 流程：**
 
 ```
-job.created → message.delta × N → message.completed → job.succeeded
+job.created → message.reasoning_delta × N? → message.delta × N → message.completed → job.succeeded
+```
+
+**SSE 典型章节正文写作流程：**
+
+```
+job.created → tool.call(chapter_context_sync) → tool.result → job.iteration
+→ message.delta × N → message.completed → job.succeeded
+```
+
+**SSE 典型多段改文提案流程：**
+
+```
+job.created → edit.proposal → message.completed → job.succeeded
+```
+
+**SSE 典型章节自动改文流程：**
+
+```
+job.created → tool.call(chapter_list) → tool.result → job.iteration
+→ tool.call(chapter_detail) → tool.result → tool.call(chapter_context_sync) → tool.result → job.iteration
+→ edit.proposal → message.completed → job.succeeded
 ```
 
 **SSE 典型 AGENT 流程：**
 
 ```
-job.created → message.delta × N → tool.call → tool.result → job.iteration
-→ message.delta × N → message.completed → job.succeeded
+job.created → message.reasoning_delta × N? → message.delta × N → tool.call → tool.result → job.iteration
+→ message.reasoning_delta × N? → message.delta × N → message.completed → job.succeeded
 ```
+
+AGENT 携带 `editorDiff` 时仍可出现 `tool.call` / `tool.result` / `job.iteration`，但不会下发模型中间正文或原始 JSON；最终仍以 `edit.proposal → message.completed → job.succeeded` 收束。章节自动改文模式下，`chapter_detail` 的 SSE 结果会脱敏章节正文，只返回章节元信息和正文长度，完整正文仅在后端内部作为改文快照使用。
 
 若达到 `maxIterations` 仍未收敛 → `job.failed`，`errorCode=AGENT_ITERATION_EXCEEDED`。
 
-**AGENT 工具白名单（当前已实现，均只读且按 userId 校验归属）：**
+**AGENT 工具白名单（当前已实现，均按 userId 和作品范围校验归属）：**
 
-| 工具名          | 说明                     |
-| --------------- | ------------------------ |
-| `novel.list`    | 列出当前用户作品列表     |
-| `novel.detail`  | 按 bookId 获取作品详情   |
-| `chapter.list`  | 按 bookId 列出章节       |
-| `chapter.detail`| 按 chapterId 获取章节详情 |
-| `prompt.list`   | 列出可访问的提示词模板   |
-| `prompt.detail` | 按 id 获取提示词模板详情 |
+| 工具名                 | 说明                      |
+| ---------------------- | ------------------------- |
+| `novel_list`           | 列出当前用户作品列表；当前请求已绑定作品时不下发 |
+| `novel_detail`         | 获取当前作品或指定作品详情；已绑定作品时可传 `{}`，未绑定时传 `bookId` |
+| `chapter_list`         | 列出当前作品或指定作品章节；已绑定作品时可传 `{}`，未绑定时传 `bookId` |
+| `chapter_detail`       | 按 `chapterId` 获取章节详情；已绑定作品时只能读取当前作品内章节 |
+| `context_item_list`    | 查询当前作品或指定作品素材库；已绑定作品时可省略 `novelId` |
+| `context_item_detail`  | 获取当前作品或指定作品素材详情；已绑定作品时可省略 `novelId` |
+
+**绑定当前作品后的通用内部写入工具：**
+
+| 工具名 | 说明 |
+| ------ | ---- |
+| `context_item_organize` | 整理当前作品已有角色库/词条库素材的一层文件夹归属；不创建、不编辑素材正文，也不处理备忘录；执行层校验用户、当前作品绑定和来源类型 |
+| `memo_write` | 创建或编辑备忘录文本；作品备忘录自动绑定当前作品，全局备忘录只绑定当前用户；参数对前端脱敏，结果只返回备忘录 ID、标题、作用域和归属摘要 |
+
+**章节正文写作/改写链路内部写入工具：**
+
+| 工具名 | 说明 |
+| ------ | ---- |
+| `chapter_context_sync` | 在当前章节写入目标内 upsert 本章明确出现的角色和词条；每项通过 `folderPath` 归纳到角色库/词条库文件夹，缺失文件夹由后端自动创建；参数对前端脱敏，结果只返回章节 ID、角色/词条数量、创建/更新数量、文件夹归纳信息和条目标题等安全摘要 |
 
 #### 7.4.2 重试生成（SSE）
 
@@ -1342,7 +2003,9 @@ POST /v1/ai/generation/:jobId/retry
 
 **响应：** 同 7.4.1 的 SSE 事件流。
 
-**错误：** `404 / NOT_FOUND`、`422 / VALIDATION_ERROR`。
+携带 `editorDiff` 的编辑提案任务不会持久化完整 `baseText` 用于后端重试；前端需要基于当前编辑器快照重新调用 `POST /v1/ai/generation/stream`。直接重试这类消息会返回 `409 / EDITOR_DIFF_RETRY_UNSUPPORTED`。
+
+**错误：** `404 / NOT_FOUND`、`409 / EDITOR_DIFF_RETRY_UNSUPPORTED`、`422 / VALIDATION_ERROR`。
 
 #### 7.4.3 取消任务
 

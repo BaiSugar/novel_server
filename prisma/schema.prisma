@@ -173,12 +173,20 @@ model User {
   aiImageGenerationJobs AiImageGenerationJob[]
   /// 用户创建的上下文素材。
   contextItems ContextItem[]
+  /// 用户创建的上下文素材文件夹。
+  contextFolders ContextFolder[]
   /// 用户创建的作品上下文绑定。
   novelContextBindings NovelContextBinding[]
+  /// 用户的 AI 上下文素材选择状态。
+  aiContextSelectionStates AiContextSelectionState[]
   /// 用户的模型偏好设置。
   modelState       UserModelState?
   /// 用户的提示词偏好设置。
   promptStates     UserPromptState[]
+  /// 用户的提示词收藏。
+  promptFavorites  UserPromptFavorite[]
+  /// 用户的通用偏好设置。
+  preferences      UserPreference[]
 
   @@map("users")
 }
@@ -237,7 +245,11 @@ model NovelBook {
   /// 作品下的章节。
   chapters    NovelChapter[]
   /// 作品可使用的上下文素材绑定。
-  contextBindings NovelContextBinding[]
+  contextBindings     NovelContextBinding[]
+  /// 作品素材库文件夹。
+  contextFolders ContextFolder[]
+  /// 作品的 AI 上下文素材选择状态。
+  aiContextSelectionStates AiContextSelectionState[]
 
   @@index([userId])
   @@map("novel_books")
@@ -264,7 +276,7 @@ model NovelChapter {
   /// 更新时间。
   updatedAt DateTime  @updatedAt @map("updated_at")
   /// 所属作品。
-  book      NovelBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  book      NovelBook      @relation(fields: [bookId], references: [id], onDelete: Cascade)
 
   @@index([bookId])
   @@map("novel_chapters")
@@ -304,6 +316,8 @@ model PromptTemplate {
   category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   /// 历史版本。
   versions      PromptTemplateVersion[]
+  /// 被哪些用户收藏。
+  favoritedBy   UserPromptFavorite[]
 
   @@index([userId])
   @@index([privacy])
@@ -419,9 +433,54 @@ model ContextSource {
   updatedAt      DateTime      @updatedAt @map("updated_at")
   /// 该来源下的上下文素材。
   items          ContextItem[]
+  /// 该来源下的素材文件夹。
+  folders        ContextFolder[]
+  /// 该来源下的 AI 上下文选择状态。
+  aiContextSelectionStates AiContextSelectionState[]
 
   @@index([enabled, sortOrder])
   @@map("context_sources")
+}
+
+/// 作品素材库文件夹，用于组织角色库、词条库、备忘录等素材。
+model ContextFolder {
+  /// 自增主键。
+  id        Int             @id @default(autoincrement())
+  /// 所属作者用户 ID。
+  userId    Int             @map("user_id")
+  /// 所属作品 ID；全局备忘录文件夹为空。
+  novelId   Int?            @map("novel_id")
+  /// 所属上下文来源 ID。
+  sourceId  Int             @map("source_id")
+  /// 父级文件夹 ID。
+  parentId  Int?            @map("parent_id")
+  /// 文件夹名称。
+  name      String          @db.VarChar(128)
+  /// 同级排序序号。
+  sortOrder Int             @default(0) @map("sort_order")
+  /// 是否软删除。
+  isDeleted Boolean         @default(false) @map("is_deleted")
+  /// 创建时间。
+  createdAt DateTime        @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  /// 所属作者。
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 所属作品。
+  novel     NovelBook?      @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  /// 所属上下文来源。
+  source    ContextSource   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// 父级文件夹。
+  parent    ContextFolder?  @relation("ContextFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  /// 子级文件夹。
+  children  ContextFolder[] @relation("ContextFolderTree")
+  /// 文件夹内素材。
+  items     ContextItem[]
+
+  @@index([userId, novelId, sourceId, parentId, sortOrder], map: "context_folders_scope_idx")
+  @@index([novelId], map: "context_folders_novel_id_idx")
+  @@index([parentId], map: "context_folders_parent_id_idx")
+  @@map("context_folders")
 }
 
 /// 作者级上下文素材，生成链路通过 contextItemIds 引用。
@@ -432,6 +491,8 @@ model ContextItem {
   userId        Int                    @map("user_id")
   /// 来源配置 ID。
   sourceId      Int                    @map("source_id")
+  /// 所属文件夹 ID。
+  folderId      Int?                   @map("folder_id")
   /// 素材标题。
   title         String                 @db.VarChar(128)
   /// 素材摘要。
@@ -440,7 +501,7 @@ model ContextItem {
   data          Json?
   /// 后端渲染后的模型上下文文本。
   renderedText  String                 @map("rendered_text") @db.Text
-  /// 是否作者级全局可用。
+  /// 历史兼容字段；作品素材库语义下固定为 false，不对外暴露。
   isGlobal      Boolean                @default(false) @map("is_global")
   /// 是否软删除。
   isDeleted     Boolean                @default(false) @map("is_deleted")
@@ -452,11 +513,13 @@ model ContextItem {
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// 来源配置。
   source        ContextSource          @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// 所属文件夹。
+  folder        ContextFolder?         @relation(fields: [folderId], references: [id], onDelete: SetNull)
   /// 作品使用绑定。
-  novelBindings NovelContextBinding[]
+  novelBindings    NovelContextBinding[]
 
   @@index([userId, sourceId, isDeleted])
-  @@index([userId, isGlobal, isDeleted])
+  @@index([userId, sourceId, folderId, isDeleted])
   @@map("context_items")
 }
 
@@ -489,6 +552,34 @@ model NovelContextBinding {
   @@index([userId, novelId, enabled, sortOrder])
   @@index([contextItemId])
   @@map("novel_context_bindings")
+}
+
+/// AI 生成设置页的上下文素材选择状态，按作品或章节维度保存。
+model AiContextSelectionState {
+  /// 所属作者用户 ID。
+  userId         Int           @map("user_id")
+  /// 作品 ID。
+  novelId        Int           @map("novel_id")
+  /// 章节 ID；0 表示作品级选择状态。
+  chapterId      Int           @default(0) @map("chapter_id")
+  /// 来源配置 ID。
+  sourceId       Int           @map("source_id")
+  /// 该来源下上一次勾选的上下文素材 ID。
+  contextItemIds Json          @map("context_item_ids")
+  /// 更新时间。
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  /// 所属作者。
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 绑定作品。
+  novel          NovelBook     @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  /// 来源配置。
+  source         ContextSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, novelId, chapterId, sourceId])
+  @@index([novelId])
+  @@index([sourceId])
+  @@index([chapterId])
+  @@map("ai_context_selection_states")
 }
 
 /// AI 模型定义，描述真实底层模型能力。
@@ -878,4 +969,43 @@ model UserPromptState {
 
   @@id([userId, categoryId])
   @@map("user_prompt_states")
+}
+
+/// 用户提示词收藏。
+model UserPromptFavorite {
+  /// 用户 ID。
+  userId           Int            @map("user_id")
+  /// 提示词模板 ID。
+  promptTemplateId Int            @map("prompt_template_id")
+  /// 收藏时间。
+  createdAt        DateTime       @default(now()) @map("created_at")
+  /// 所属用户，级联删除。
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 被收藏的提示词。
+  promptTemplate   PromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+
+  @@id([userId, promptTemplateId])
+  @@index([userId])
+  @@index([promptTemplateId])
+  @@map("user_prompt_favorites")
+}
+
+/// 用户通用偏好设置，按 key/value 存储可扩展偏好。
+model UserPreference {
+  /// 用户 ID。
+  userId    Int      @map("user_id")
+  /// 偏好键。
+  key       String   @db.VarChar(128)
+  /// 偏好内容。
+  value     Json
+  /// 创建时间。
+  createdAt DateTime @default(now()) @map("created_at")
+  /// 更新时间。
+  updatedAt DateTime @updatedAt @map("updated_at")
+  /// 所属用户，级联删除。
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+  @@index([key])
+  @@map("user_preferences")
 }

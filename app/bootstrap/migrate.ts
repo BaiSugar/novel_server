@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { buildDatabaseUrl } from "@/app/config/database";
 import { logger } from "@/app/lib/logger";
 
 /**
@@ -8,7 +9,9 @@ import { logger } from "@/app/lib/logger";
  */
 export async function applyMigrations(): Promise<void> {
   try {
-    await $`bunx --bun prisma migrate deploy`.quiet();
+    await $`bunx --bun prisma migrate deploy`
+      .env({ ...process.env, DATABASE_URL: buildDatabaseUrl(process.env) })
+      .quiet();
     logger.info("[bootstrap] migrations applied");
   } catch (error) {
     logger.error("[bootstrap] migration failed", error as Error);

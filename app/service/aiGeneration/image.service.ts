@@ -85,12 +85,13 @@ export async function createAndRun(
 
   const context = await resolveGenerationContext(userId, {
     userMessage: input.prompt,
-    promptTemplateId: input.promptTemplateId,
+    promptTemplateIds: input.promptTemplateId ? [input.promptTemplateId] : undefined,
     promptInputs: input.promptInputs,
     contextItemIds: input.contextItemIds,
+    categoryContexts: input.categoryContexts,
     metadata: input.metadata,
   });
-  const finalPrompt = [context.contextText, context.renderedPrompt]
+  const finalPrompt = [context.systemPromptText, context.finalUserPrompt]
     .filter(Boolean)
     .join("\n\n");
   let row = await prisma.aiImageGenerationJob.create({

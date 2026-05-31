@@ -31,6 +31,7 @@ export type AuditCategory =
   | "prompt"
   | "prompt_category"
   | "creative_tool"
+  | "context_library"
   | "ai"
   | "security"
   | "system";

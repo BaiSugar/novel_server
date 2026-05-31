@@ -3,11 +3,90 @@ import type {
   AiGenerationMode,
 } from "@/app/generated/prisma/enums";
 
+export interface EditorDiffRange {
+  start: number;
+  end: number;
+}
+
+export interface EditorDiffCaret {
+  offset: number;
+}
+
+export interface EditorDiffTarget {
+  novelId: number;
+  chapterId: number;
+  chapterTitle: string;
+}
+
+export interface EditorMultiDiffInput {
+  mode: "novel_multi_diff";
+  documentId?: string;
+  docVersion?: string;
+  baseHash: string;
+  baseText: string;
+  caretOffset?: number;
+  cursorOffset?: number;
+  selection?: EditorDiffRange;
+  intent?: string;
+}
+
+export interface ChapterAutoDiffInput {
+  mode: "chapter_auto_diff";
+}
+
+export interface ResolvedEditorDiffInput {
+  mode: "novel_multi_diff" | "chapter_auto_diff";
+  target?: EditorDiffTarget;
+  documentId?: string;
+  docVersion?: string;
+  baseHash: string;
+  baseText: string;
+  caretOffset: number;
+  cursorOffset?: number;
+  selection?: EditorDiffRange;
+  intent?: string;
+}
+
+export type EditorDiffInput =
+  | EditorMultiDiffInput
+  | ChapterAutoDiffInput
+  | ResolvedEditorDiffInput;
+
+export interface EditorDiffOperation {
+  id: string;
+  type: "replace";
+  range: EditorDiffRange;
+  oldText: string;
+  newText: string;
+  reason?: string;
+}
+
+export interface EditorDiffProposal {
+  mode: "novel_multi_diff" | "chapter_auto_diff";
+  target?: EditorDiffTarget;
+  documentId?: string;
+  docVersion?: string;
+  baseHash: string;
+  baseLength: number;
+  operations: EditorDiffOperation[];
+  caret?: EditorDiffCaret;
+  cursor?: EditorDiffCaret;
+  summary?: string;
+}
+
+export interface CategoryContextInput {
+  categoryId: number;
+  content: string;
+}
+
 export interface AiMetadata {
   novelId?: number;
   chapterId?: number;
   promptTemplateId?: number;
   scene?: string;
+  quickWriting?: {
+    chapterFullTextCount?: number;
+  };
 }
 
 export interface CreateConversationInput {
@@ -56,6 +135,22 @@ export interface CursorQuery {
   includeSuperseded?: boolean;
 }
 
+export interface AiGenerationInputSnapshot {
+  conversationId?: number;
+  userMessage?: string;
+  promptTemplateIds?: number[];
+  promptInputs?: Record<string, unknown>;
+  contextItemIds?: number[];
+  chapterIds?: number[];
+  chapterSummaryIds?: number[];
+  categoryContexts?: CategoryContextInput[];
+  metadata?: AiMetadata | null;
+  editorDiff?: unknown;
+  mode: AiGenerationMode;
+  modelId: number;
+  temperature?: number;
+}
+
 export interface AiMessageItem {
   id: number;
   conversationId: number;
@@ -63,7 +158,9 @@ export interface AiMessageItem {
   role: string;
   status: string;
   content: string;
-  contentRedacted?: boolean;
+  reasoningContent?: string;
+  editProposal?: EditorDiffProposal;
+  generationInput?: AiGenerationInputSnapshot;
   toolCalls: unknown | null;
   toolCallId: string | null;
   toolName: string | null;
@@ -81,7 +178,11 @@ export interface CreateGenerationInput {
   promptTemplateIds?: number[];
   promptInputs?: Record<string, unknown>;
   contextItemIds?: number[];
-  metadata?: AiMetadata;
+  chapterIds?: number[];
+  chapterSummaryIds?: number[];
+  categoryContexts?: CategoryContextInput[];
+  metadata?: AiMetadata | null;
+  editorDiff?: EditorDiffInput;
   mode: AiGenerationMode;
   modelId: number;
   temperature?: number;
@@ -118,6 +219,7 @@ export interface CreateImageGenerationInput {
   promptTemplateId?: number;
   promptInputs?: Record<string, unknown>;
   contextItemIds?: number[];
+  categoryContexts?: CategoryContextInput[];
   metadata?: AiMetadata;
   size?: string;
   quality?: string;

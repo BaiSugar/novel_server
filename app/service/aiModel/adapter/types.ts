@@ -9,6 +9,7 @@ export interface ChatToolCall {
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  reasoningContent?: string;
   toolCallId?: string;
   toolCalls?: ChatToolCall[];
 }
@@ -29,10 +30,12 @@ export interface ChatInvokeRequest {
 
 export type ChatStreamEvent =
   | { type: "delta"; text: string }
+  | { type: "reasoning_delta"; text: string }
   | { type: "tool_call"; toolCall: ChatToolCall }
   | {
       type: "completed";
       text: string;
+      reasoningContent?: string;
       usage?: TokenUsage;
       toolCalls?: ChatToolCall[];
     }

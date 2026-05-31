@@ -11,6 +11,11 @@ const MetadataSchema = t.Optional(
   }),
 );
 
+const CategoryContextSchema = t.Object({
+  categoryId: t.Numeric(),
+  content: t.String({ maxLength: 16000 }),
+});
+
 export default $g.ctrl((app) =>
   app
     .post(
@@ -34,6 +39,7 @@ export default $g.ctrl((app) =>
           promptTemplateId: t.Optional(t.Numeric()),
           promptInputs: t.Optional(t.Record(t.String(), t.Unknown())),
           contextItemIds: t.Optional(t.Array(t.Numeric())),
+          categoryContexts: t.Optional(t.Array(CategoryContextSchema)),
           metadata: MetadataSchema,
           size: t.Optional(t.String({ maxLength: 32 })),
           quality: t.Optional(t.String({ maxLength: 32 })),

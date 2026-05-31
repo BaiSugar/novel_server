@@ -25,8 +25,9 @@ export default new Elysia({ name: __filename })
       origin: buildOrigins(),
       credentials: true,
       allowedHeaders: ["Content-Type", "Authorization"],
+      maxAge: 86400,
     }),
   )
-  .use(openapi())
+  .use(process.env.NODE_ENV !== "production" ? openapi() : (app) => app)
   .use(staticPlugin())
   .use(plug_controller.use(routes));

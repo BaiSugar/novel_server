@@ -77,9 +77,9 @@ const AuthResultSchema = t.Object({
 const RegisterBodySchema = t.Object({
   /** 用户名。 */
   username: t.String({
-    minLength: 3,
+    minLength: 2,
     maxLength: 64,
-    pattern: "^[a-zA-Z0-9_-]{3,64}$",
+    pattern: "^[\\u4e00-\\u9fff\\w-]{2,64}$",
   }),
   /** 邮箱。 */
   email: t.String({ format: "email", maxLength: 255 }),

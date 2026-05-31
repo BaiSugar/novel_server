@@ -5,6 +5,8 @@
   "scripts": {
     "menu": "bun ./support/script/menu.ts",
     "dev": "bun --parallel run watch_generate_script watch_dev",
+    "build": "bun run generate_script && bun build ./app/cluster.ts --outdir=dist --target=bun --external @prisma/client --external mariadb --external @prisma/adapter-mariadb",
+    "start": "NODE_ENV=production bun --hot ./app/cluster.ts",
     "start-hot": "NODE_ENV=production bun --hot ./app/cluster.ts",
     "start-hot-bg": "NODE_ENV=production bun --hot --background ./app/cluster.ts",
     "fix": "bunx --bun @biomejs/biome check --write .",

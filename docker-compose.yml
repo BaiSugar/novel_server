@@ -1,0 +1,49 @@
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    env_file: .env.prod
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./prisma:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      NODE_ENV: production
+    ports:
+      - "${PORT:-4000}:4000"
+    env_file: .env.prod
+    entrypoint: []
+    volumes:
+      # 挂载运行期会变更的源码和配置；保留镜像内 Linux node_modules。
+      - ./app:/app/app
+      - ./support:/app/support
+      - ./prisma:/app/prisma
+      - ./public:/app/public
+      - ./package.json:/app/package.json
+      - ./bun.lock:/app/bun.lock
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./prisma.config.ts:/app/prisma.config.ts
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        bun run prisma_generate &&
+        bun run generate_script &&
+        bun run start
+
+volumes:
+  mysql_data:

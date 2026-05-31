@@ -51,10 +51,15 @@ export type PromptOutput = Omit<PromptTemplateModel, "content"> & {
   versionCount: number;
   /** 所属分类显示名（未分类为 null）。 */
   category: string | null;
+  /** 作者用户名。 */
+  authorName: string | null;
 };
 
 /** API 返回的提示词列表项（不含 content，含 presetOptions）。 */
-export type PromptListItem = Omit<PromptOutput, "content">;
+export type PromptListItem = Omit<PromptOutput, "content"> & {
+  /** 作者用户名。 */
+  authorName: string | null;
+};
 
 /** 版本列表项。 */
 export interface VersionListItem {
@@ -90,6 +95,7 @@ const PROMPT_SELECT = {
   createdAt: true,
   updatedAt: true,
   category: { select: { name: true } },
+  user: { select: { username: true } },
   _count: { select: { versions: true } },
 } as const;
 
@@ -107,6 +113,7 @@ const PROMPT_LIST_SELECT = {
   createdAt: true,
   updatedAt: true,
   category: { select: { name: true } },
+  user: { select: { username: true } },
   _count: { select: { versions: true } },
 } as const;
 
@@ -118,13 +125,26 @@ function mapPromptOutput(
 ): PromptOutput {
   const count = (row._count as { versions: number })?.versions ?? 0;
   const category = (row.category as { name: string } | null)?.name ?? null;
-  const { _count: _, category: __, content, ...rest } = row;
+  const authorName =
+    (row.user as { username: string } | null | undefined)?.username ?? null;
+  const { _count: _, category: __, content, user: __user, ...rest } = row;
   return {
     ...rest,
     ...(includeContent && typeof content === "string" ? { content } : {}),
     versionCount: count,
     category,
+    authorName,
   } as PromptOutput;
+}
+
+function mapPromptListItem(row: Record<string, unknown>): PromptListItem {
+  const authorName =
+    (row.user as { username: string } | null | undefined)?.username ?? null;
+  const { user: _, ...rest } = row;
+  return {
+    ...mapPromptOutput(rest),
+    authorName,
+  };
 }
 
 /**
@@ -228,7 +248,7 @@ export async function list(
   ]);
 
   return {
-    items: items.map((item) => mapPromptOutput(item)),
+    items: items.map((item) => mapPromptListItem(item)),
     total,
     page,
     pageSize,

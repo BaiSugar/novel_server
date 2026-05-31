@@ -18,8 +18,22 @@ const SENSITIVE_KEYS = new Set([
   "userMessage",
   "systemPrompt",
   "prompt",
+  "customPrompt",
   "promptInputs",
+  "editorDiff",
+  "baseText",
+  "selectionText",
+  "oldText",
+  "newText",
+  "operations",
+  "contextBefore",
+  "contextAfter",
 ]);
+
+type AuditStore = Record<string, unknown> & {
+  _auditCategory?: AuditCategory;
+  _auditAction?: string;
+};
 
 /** 开发日志开关，默认开启（`DEV_LOG=false` 关闭） */
 const DEV_LOG = process.env.DEV_LOG !== "false";
@@ -39,6 +53,8 @@ const RESET = "\x1b[0m";
 function redactSensitive(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(redactSensitive);
+  if (typeof (value as Record<string, unknown>).pipe === "function")
+    return "[STREAM]";
 
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
@@ -166,10 +182,9 @@ export default new Elysia({ name: __filename })
       if (!options) return {};
       return {
         beforeHandle({ store }) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (store as any)._auditCategory = options.category;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (store as any)._auditAction = options.action;
+          const auditStore = store as AuditStore;
+          auditStore._auditCategory = options.category;
+          auditStore._auditAction = options.action;
         },
       };
     },
@@ -199,13 +214,9 @@ export default new Elysia({ name: __filename })
 
       printDevLog(request.method, status, pathname, elapsed);
 
-      // 审计日志：读取 controller 通过 audit 宏写入 store 的元信息
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const category = (store as any)._auditCategory as
-        | AuditCategory
-        | undefined;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const action = (store as any)._auditAction as string | undefined;
+      const auditStore = store as AuditStore;
+      const category = auditStore._auditCategory;
+      const action = auditStore._auditAction;
       if (status < 300 && request.method !== "GET" && category && action) {
         const ip =
           request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
