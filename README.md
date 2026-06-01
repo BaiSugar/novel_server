@@ -1,213 +1,161 @@
 [English](./README-en.md) | [中文](./README.md)
 
-## 预发布版本
+# Novel 后端
 
-- `1.0.0` 版本起即为正式版。
-- `bun create app-elysia@latest` - 尝鲜体验
+Novel 是一个面向 AI 网文写作平台的后端服务，负责用户鉴权、作品与章节管理、提示词体系、上下文素材库、备忘录、AI 模型槽位管理，以及统一的文本 / 图片生成任务编排。
 
-## 项目结构
+项目基于 Bun + Elysia + Prisma 构建，使用 MySQL / MariaDB 作为主要数据存储，并以分层服务结构承载复杂写作业务。
 
-> ⚠️ **注意**：Prisma、Drizzle 相关文件仅在通过 CLI 选择对应模板时生成。
+## 核心能力
 
-- 全自动路由、日志系统、ORM、端到端类型安全，更多功能即将推出。
+- **账号与权限**：用户注册、登录、Refresh Token 轮换、角色权限校验。
+- **作品创作管理**：作品、章节、排序、归档、回收站、章节正文加密存储。
+- **提示词体系**：提示词分类、模板变量、版本快照、审核、收藏。
+- **上下文素材库**：角色库、词条库、作品素材绑定、单层文件夹归纳。
+- **备忘录**：全局备忘录与作品备忘录，用于记录长期偏好、创作计划、伏笔和约束。
+- **AI 模型管理**：模型槽位、供应商账号、模型绑定、健康状态与故障处理。
+- **AI 生成编排**：统一 SSE 生成入口，支持 `STANDARD` 单轮生成与 `AGENT` 工具循环。
+- **编辑器写作场景**：行内续写、剧情建议、选区扩写、章节改文提案、素材同步。
+- **图片生成任务**：图片生成请求、任务状态与结果管理。
+- **日志与审计**：请求日志、响应日志、审计日志、错误统一封装。
 
-```
-Project/
-├── public/                   # 静态资源（自动路由）
-├── app/
-│   ├── common/
-│   │   └── index.ts          # 全局模块 (注册到全局"$g", 仅`controller`中使用)
-│   │   └── schemas.ts        # 数据模型 (自动使用elysia.model注册)
-│   │   └── schemaDerive.ts   # 数据模型的派生类型和方法
-│   ├── controller/           # 控制器层 (自动加载`ctrl.ts`结尾的文件,改变时自动更新路由)
-│   ├── lib/
-│   │   ├── error.ts          # 全局错误与进程事件捕获记录 (同步模式)
-│   │   ├── logger.ts         # 日志库 (默认异步模式)
-│   │   ├── drizzle.ts        # Drizzle 客户端
-│   │   ├── prisma.ts         # Prisma 客户端
-│   │   └── redis.ts          # Redis 客户端
-│   ├── model/                # Drizzle 数据模型目录
-│   ├── plugins/
-│   │   ├── index.plug.ts     # 全局插件
-│   │   └── macro.plug.ts     # 宏插件
-│   │   └── controller.plug.ts # 控制器插件
-│   │   └── schemas.plug.ts   # 数据模型注册插件
-│   ├── utils/                # 工具函数
-│   └── cluster.ts            # 单机多进程集群模式入口
-│   └── index.ts              # 应用入口
-├── logs/
-├── prisma/
-│   └── schema.prisma         # Prisma 数据模型
-├── test/                     # Eden 测试目录
-├── support/                  # 辅助脚本目录（无需关心）
-│   └── script/
-│       ├── index.ts          # 生成脚本
-│       ├── menu.ts           # 命令菜单
-│       └── routes.ts         # 路由生成工具
-|── .env                      # 配置文件
-|── prisma.config.ts          # prisma 配置
-|── drizzle.config.ts         # drizzle 配置
-...
+## 技术栈
+
+| 层 | 技术 |
+| --- | --- |
+| Runtime | Bun |
+| Web 框架 | Elysia 1.4.x |
+| ORM | Prisma 7.x |
+| 数据库 | MySQL / MariaDB |
+| 缓存 | Redis，可选 |
+| 类型检查 | TypeScript |
+| 代码风格 | Biome |
+
+## 架构概览
+
+```text
+请求 → plugins 链 → controller → service → Prisma → MySQL
+                         ↑                    ↑
+                       $g              基础设施与业务服务
 ```
 
-## 使用 CLI 创建项目
+- `plugins/`：鉴权、响应宏、限流、OpenAPI、静态资源、自动路由挂载。
+- `controller/`：薄控制层，只做参数校验、鉴权宏声明和响应组装。
+- `service/`：业务核心层，承载数据校验、状态转换、模型调用、工具执行和数据库操作。
+- `lib/`：Prisma、日志、审计、错误、Redis 等基础设施。
+- `utils/`：Token、密码、章节内容编解码、SSE、字数统计等通用工具。
+- `docs/`：API、AI 模型、AI 生成、项目结构和安全机制文档。
 
-```bash
-bun create app-elysia@latest
+## 主要目录
+
+```text
+app/
+├── controller/          # API 控制器，按版本和业务域组织
+├── service/             # 业务服务，按业务域组织
+├── plugins/             # Elysia 插件链
+├── lib/                 # 基础设施
+├── utils/               # 通用工具
+├── config/              # 环境配置
+└── bootstrap/           # 启动初始化
+
+prisma/                  # Prisma schema、迁移与初始化 SQL
+docs/                    # 对接文档和设计文档
+support/                 # 自动路由与生成脚本
 ```
 
-- 当然，你也可以直接下载本仓库使用。
-
-### 选择 Drizzle 模板后，请按以下步骤进行配置：
-
-1. **检查数据库配置** — 确认 [.env](.env) 中的数据库连接信息是否正确
-2. **确认数据模型** — 检查 [app/model](app/model) 中的模型定义是否符合需求
-3. **同步到数据库** — 运行 `bun run generate_drizzle` + `bun run drizzle_migrate`
-
-### 选择 Prisma 模板后，请按以下步骤进行配置：
-
-1. **检查数据库配置** — 确认 [.env](.env) 中的数据库连接信息是否正确
-2. **确认数据模型** — 检查 [schema.prisma](prisma/schema.prisma) 中的模型定义是否符合需求
-3. **同步到数据库**（新数据库时执行）— 运行 `bunx --bun prisma migrate dev --name init` 创建初始迁移
-4. **生成客户端** — 执行 `bunx --bun prisma generate` 生成 Prisma Client
+完整目录说明见 [`docs/project-structure.md`](./docs/project-structure.md)。
 
 ## 快速开始
 
+### 1. 安装依赖
+
 ```bash
-bun i
+bun install
+```
+
+### 2. 配置环境变量
+
+复制并配置项目所需的 `.env`，重点包括：
+
+- 数据库连接信息
+- `JWT_SECRET`
+- 章节正文加密密钥
+- 可选 Redis 地址
+- 首次启动管理员配置
+
+### 3. 初始化数据库
+
+```bash
+bunx --bun prisma generate
+bunx --bun prisma migrate dev
+```
+
+生产环境可使用：
+
+```bash
+bunx --bun prisma migrate deploy
+bunx --bun prisma generate
+```
+
+### 4. 启动开发服务
+
+```bash
 bun run dev
 ```
 
-## 命令
+## 常用命令
 
 ```bash
-bun run menu    # 启动交互式菜单
-bun run dev     # 启动开发服务器、自动生成路由
-bun run start-hot # 以正式环境启动，支持热更新
-bun run start-hot-bg # 以正式环境启动，支持热更新，关闭终端不终止进程
-bun run fix     # 修复代码风格
-
-bun run generate  # 运行全部`generate_`开头的命令
-bun run generate_script  # 生成路由（一般不需要手动执行）
-
-bun run drizzle_studio  # drizzle可视化
-bun run generate_drigrate_migrate # 生成迁移并执行
-
-bun run prisma_studio  # prisma可视化
-bun run generate_prisma_migrate_dev  # prisma开发：迁移 + 执行 + 生成客户端
-bun run prisma_generate_migrate_deploy  # prisma生产：执行迁移 + 生成客户端
-```
-- `bun run menu --list` 列出所有选项
-- `bun run menu <父级> <子项> <...>` 支持按路径逐级定位执行
-
-## 日志配置
-
-- 默认：[应用使用`同步`模式记录](app/lib/error.ts)，[控制器使用`异步`记录的方式](app/plugins/controller.plug.ts)。
-
-```typescript
-import { Logger, logger } from "@/app/lib/logger";
-//const logger = new Logger({ sync: false, level: "debug" });
-logger.info("msg", { meta: "value" });
-logger.error("msg", Object | Error);
+bun run dev                         # 开发模式，监听路由生成与服务启动
+bun run build                       # 构建 Bun 产物
+bun run start                       # 生产模式启动
+bun run start-hot                   # 生产模式热更新启动
+bun run generate_script             # 生成自动路由
+bun run prisma_generate             # 生成 Prisma Client
+bun run generate_prisma_migrate_dev # 开发环境迁移
+bun run prisma_generate_migrate_deploy # 生产环境迁移并生成 Client
+bun run prisma_studio               # 打开 Prisma Studio
+bun run fix                         # Biome 格式化与修复
 ```
 
-[logger.ts](app/lib/logger.ts)
+## API 与系统文档
 
-```typescript
-/** 日志级别 */
-export type LogLevel = "debug" | "info" | "warn" | "error";
+- [`docs/api.md`](./docs/api.md)：前端 API 对接文档。
+- [`docs/ai-model.md`](./docs/ai-model.md)：AI 模型槽位、账号、绑定和健康状态设计。
+- [`docs/ai-generation.md`](./docs/ai-generation.md)：AI 文本 / 图片生成、SSE、AGENT 工具链和编辑提案设计。
+- [`docs/security.md`](./docs/security.md)：JWT 即时撤销机制。
+- [`docs/project-structure.md`](./docs/project-structure.md)：项目目录和分层原则。
 
-/** 文件轮转粒度 */
-export type RotateBy = "hour" | "day" | "month";
+## AI 生成链路
 
-/** 日志元数据类型 */
-export type Meta = Record<string, unknown> | Error | undefined | null;
+文本生成统一使用：
 
-/** Logger 构造选项 */
-export interface LoggerOptions {
-  /** 日志输出目录，默认 `logs` */
-  dir?: string;
-  /** 文件轮转粒度，默认 `day` */
-  rotateBy?: RotateBy;
-  /** 是否同时输出到 stdout，默认 `true` */
-  stdout?: boolean;
-  /** 最低记录级别，默认 `debug` */
-  level?: LogLevel;
-  /** 定时刷新间隔（ms），默认 `1000` */
-  flushInterval?: number;
-  /**
-   * 内存缓冲高水位线（字节），达到后同步落盘，默认 `1MB`
-   * 适用于 async 模式；sync 模式每次写入直接落盘，此选项无效
-   */
-  highWaterMark?: number;
-  /** 保留归档文件的最大数量，0 表示不限制，默认 `0` */
-  maxFiles?: number;
-  /** 同步写入模式，默认 `false` */
-  sync?: boolean;
-  /** 格式化元数据的缩进空格数，默认 `1` */
-  formatted?: number;
-}
+```text
+POST /v1/ai/generation/stream
 ```
 
-## AI技能 / 针对LLMS
+生成任务通过 SSE 返回事件，核心事件包括：
 
-```bash
-bunx skills add elysiajs/skills
-```
+- `job.created`
+- `message.delta`
+- `message.reasoning_delta`
+- `tool.call`
+- `tool.result`
+- `edit.proposal`
+- `message.completed`
+- `job.succeeded`
+- `job.failed`
 
-- [llms](https://elysiajs.com/llms.txt)
-- [llms-full](https://elysiajs.com/llms-full.txt)
+后端负责模型上下文构建、历史裁剪、工具调用、敏感内容脱敏、章节编辑提案校验、素材同步和任务状态落库。
 
-## MCP推荐
+## 开发原则
 
-```json
-{
-  "mcpServers": {
-    // 任何GitHub项目转变为文档中心
-    "名称": {
-      "url": "https://gitmcp.io/{作者}/{仓库}"
-    },
-    // elysia 文档
-    "elysia": {
-      "url": "https://gitmcp.io/elysiajs/documentation"
-    },
-    // Bun 文档
-    "bun": {
-      "url": "https://bun.com/docs/mcp",
-    },
-    // 代码库上下文理解服务
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp",
-        "--api-key",
-        "你的密钥"
-      ]
-    },
-    // 代码库深度理解服务
-    "deepwiki": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-deepwiki@latest"
-      ]
-    },
-    // Chrome 开发者工具集成
-    "chrome-devtools": {
-      "command": "npx",
-      "args": [
-        "chrome-devtools-mcp@latest"
-      ]
-    },
-    // Playwright 浏览器自动化
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@latest"
-      ]
-    }
-  }
-}
-```
+- controller 保持薄层，业务逻辑放入 service。
+- 用户输入、模型输出、工具结果和素材正文均按不可信数据处理。
+- 提示词正文、章节正文、工具结果正文等敏感内容默认不对前端暴露。
+- 新增业务域时同步审计日志配置。
+- 新增、删除或移动文件夹后同步更新 `docs/project-structure.md`。
 
+## 致谢
+
+感谢 [Elysia](https://elysiajs.com/) 为本项目提供高性能、类型友好的 Bun Web 框架基础。
