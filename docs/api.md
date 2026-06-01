@@ -1671,7 +1671,7 @@ POST /v1/ai/generation/stream
 
 **请求体：**
 
-前端只传生成意图和业务输入：`mode`、`modelId` 必填；`promptTemplateIds` 与 `promptInputs` 是主入口；后端负责读取提示词模板、替换 `{{变量}}`，并把渲染后的提示词放入 system prompt。`contextItemIds`、`categoryContexts` 和显式章节字段属于用户明确选择/输入的创作素材，会和 `userMessage` 一起组成本次生成输入；首轮生成时该输入作为 system 下发给模型，已有历史的续聊才作为本轮 user 消息下发。`metadata.novelId` / `metadata.chapterId` 主要表示业务关联和筛选条件；普通生成不会自动注入作品简介或章节正文。作品编辑器快捷写作复用 `metadata.scene` 传动作标识，并可通过 `metadata.quickWriting.chapterFullTextCount` 控制本次自动章节上下文；这些运行态字段不会持久化为会话场景，也不会被后续普通生成继承。`editorDiff` 是可选运行态输入，显式传入时本次生成改为返回多段改文提案，不直接修改章节正文，也不写入会话 `metadata`；`aiContinueInline`、`aiPlotAdvice`、`aiExpandSelection` 三个快捷动作不支持同时传入 `editorDiff`。快捷动作未显式传 `promptTemplateIds` 时，后端会按 `categoryContexts.categoryId` 读取用户保存的分类提示词状态。`conversationId` 可选，未传时后端会创建会话，并通过 `job.created` SSE 事件返回 `conversationId`。`userMessage` 仅作为兼容补充输入使用。
+前端只传生成意图和业务输入：`mode`、`modelId` 必填；`promptTemplateIds` 与 `promptInputs` 是主入口；后端负责读取提示词模板、替换 `{{变量}}`，并把渲染后的提示词放入 system prompt。`contextItemIds`、`categoryContexts` 和显式章节字段属于用户明确选择/输入的创作素材，会和 `userMessage` 一起组成本次生成输入；首轮生成时该输入作为 system 下发给模型，已有历史的续聊才作为本轮 user 消息下发。`metadata.novelId` / `metadata.chapterId` 主要表示业务关联和筛选条件；普通生成不会自动注入作品简介或章节正文。作品编辑器快捷写作复用 `metadata.scene` 传动作标识，并可通过 `metadata.quickWriting.chapterFullTextCount` 控制本次自动章节上下文；这些运行态字段不会持久化为会话场景，也不会被后续普通生成继承。`editorDiff` 是可选运行态输入，显式传入时本次生成改为返回多段改文提案，不直接修改章节正文，也不写入会话 `metadata`；`aiContinueInline`、`aiPlotAdvice`、`aiExpandSelection` 三个快捷动作不支持同时传入 `editorDiff`，后端也不会在这三个动作下启用模型侧章节 diff 提案链路。快捷动作未显式传 `promptTemplateIds` 时，后端会按 `categoryContexts.categoryId` 读取用户保存的分类提示词状态。`conversationId` 可选，未传时后端会创建会话，并通过 `job.created` SSE 事件返回 `conversationId`。`userMessage` 仅作为兼容补充输入使用。
 
 | 字段               | 类型                   | 必填 | 说明                                                         |
 | ------------------ | ---------------------- | ---- | ------------------------------------------------------------ |
@@ -1789,7 +1789,7 @@ POST /v1/ai/generation/stream
 
 **作品编辑器快捷动作：**
 
-`metadata.scene` 命中以下值时，后端会把它识别为一次性快捷动作标识，不会把该值当作普通创作场景注入，也不会持久化为会话场景。快捷动作的任务约束来自现有提示词体系：请求显式传入的 `promptTemplateIds` 优先；未传时，后端按 `categoryContexts.categoryId` 读取用户保存的分类提示词状态并渲染对应提示词模板。这三个快捷动作只走普通生成，不支持随请求传入 `editorDiff`。
+`metadata.scene` 命中以下值时，后端会把它识别为一次性快捷动作标识，不会把该值当作普通创作场景注入，也不会持久化为会话场景。快捷动作的任务约束来自现有提示词体系：请求显式传入的 `promptTemplateIds` 优先；未传时，后端按 `categoryContexts.categoryId` 读取用户保存的分类提示词状态并渲染对应提示词模板。这三个快捷动作只走普通生成，不支持随请求传入 `editorDiff`，也不会启用模型侧章节 diff 提案链路；即使是 AGENT 模式，模型也按普通文本直接输出。
 
 | scene | 前端动作 | 提示词来源 | 章节上下文 |
 | --- | --- | --- | --- |
