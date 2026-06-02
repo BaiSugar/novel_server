@@ -156,6 +156,12 @@ The backend is responsible for model context construction, history truncation, t
 - Update audit log configuration when adding a new business domain.
 - Update `docs/project-structure.md` after adding, deleting, or moving files or directories.
 
+## License
+
+This project is open-sourced under the [GNU Affero General Public License v3.0](./LICENSE).
+
 ## Acknowledgements
 
 Thanks to [Elysia](https://elysiajs.com/) for providing the high-performance, type-friendly Bun web framework foundation for this project.
+
+Thanks also to the [Linux.do](https://linux.do/) community for supporting development discussions and technical exchange.

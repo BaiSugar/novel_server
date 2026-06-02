@@ -156,6 +156,14 @@ POST /v1/ai/generation/stream
 - 新增业务域时同步审计日志配置。
 - 新增、删除或移动文件夹后同步更新 `docs/project-structure.md`。
 
+## 许可证
+
+本项目基于 [GNU Affero General Public License v3.0](./LICENSE) 开源。
+
 ## 致谢
 
 感谢 [Elysia](https://elysiajs.com/) 为本项目提供高性能、类型友好的 Bun Web 框架基础。
+
+## 友情链接
+
+ [linux.do 社区](https://linux.do/) 对项目交流与支持。
