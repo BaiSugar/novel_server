@@ -164,6 +164,4 @@ POST /v1/ai/generation/stream
 
 感谢 [Elysia](https://elysiajs.com/) 为本项目提供高性能、类型友好的 Bun Web 框架基础。
 
-## 友情链接
-
- [linux.do 社区](https://linux.do/) 对项目交流与支持。
+感谢 [linux.do 社区](https://linux.do/) 对项目交流与支持。
